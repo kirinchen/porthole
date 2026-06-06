@@ -1,5 +1,6 @@
 /**
- * porthole 後端入口 — Fastify,單 port 4321,只綁 127.0.0.1(SPEC §2)。
+ * porthole 後端入口 — Fastify,單 port 4321。預設綁 127.0.0.1;
+ * 設 HOST 環境變數可改綁特定介面(如 tailscale IP),見 SPEC §2。
  * serve 前端 build + REST/SSE + WebSocket;PathGuardError → 403。
  */
 import Fastify from 'fastify';
@@ -18,7 +19,7 @@ import cliRoutes from './routes/cli.ts';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIST = path.resolve(__dirname, '../web/dist');
 const PORT = Number(process.env.PORT ?? 4321);
-const HOST = '127.0.0.1';
+const HOST = process.env.HOST ?? '127.0.0.1';
 
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 
