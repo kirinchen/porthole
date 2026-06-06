@@ -1,0 +1,17 @@
+[Unit]
+Description=porthole — coral 助理 web GUI (Fastify + Vite, tailscale)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/kirin/Desktop/project/porthole
+# 綁 0.0.0.0 → 本機 + tailscale 皆可達(家用無公網直連)
+Environment=HOST=0.0.0.0
+Environment=PORT=4321
+# bash -lc 載入 nvm,讓 node/npm 在 PATH
+ExecStart=/bin/bash -lc 'npm run start'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
