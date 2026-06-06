@@ -3,7 +3,7 @@
  * active repo = URL path 第一段(/coral → coral),切換時 pushState。
  */
 import { useEffect, useMemo, useState } from 'react';
-import { Layout, Menu, Select, Typography, Spin, Alert } from 'antd';
+import { Layout, Menu, Select, Typography, Spin, Alert, Grid } from 'antd';
 import {
   FolderOpenOutlined,
   MessageOutlined,
@@ -37,6 +37,8 @@ export default function App() {
   const [tab, setTab] = useState<TabKey>('explore');
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md; // <768px:Sider 收成 icon-only,header 精簡
 
   useEffect(() => {
     api
@@ -83,19 +85,21 @@ export default function App() {
           alignItems: 'center',
           gap: 12,
           background: '#001529',
-          padding: '0 16px',
+          padding: isMobile ? '0 12px' : '0 16px',
         }}
         data-loc="app:header"
       >
         <Typography.Text strong style={{ color: '#fff', fontSize: 16 }}>
           porthole
         </Typography.Text>
-        <Typography.Text style={{ color: '#8c8c8c', fontSize: 12 }}>舷窗</Typography.Text>
+        {!isMobile && (
+          <Typography.Text style={{ color: '#8c8c8c', fontSize: 12 }}>舷窗</Typography.Text>
+        )}
         <Select
           value={repo || undefined}
           onChange={setRepo}
           options={repos.map((r) => ({ value: r, label: r }))}
-          style={{ minWidth: 200, marginLeft: 16 }}
+          style={isMobile ? { flex: 1, marginLeft: 8 } : { minWidth: 200, marginLeft: 16 }}
           placeholder="選 repo"
           showSearch
           data-loc="app:repo:select"
@@ -103,7 +107,13 @@ export default function App() {
         {err && <Alert type="error" message={err} banner style={{ marginLeft: 'auto' }} />}
       </Header>
       <Layout>
-        <Sider width={120} theme="light" style={{ borderRight: '1px solid #f0f0f0' }}>
+        <Sider
+          width={120}
+          collapsedWidth={56}
+          collapsed={isMobile}
+          theme="light"
+          style={{ borderRight: '1px solid #f0f0f0' }}
+        >
           <Menu
             mode="inline"
             selectedKeys={[tab]}
