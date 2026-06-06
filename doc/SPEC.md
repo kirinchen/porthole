@@ -42,7 +42,9 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
   - 所有 fs 讀寫、claude/tmux 的 CWD,**一律先正規化(`realpath`)再驗證仍落在 `<base>` 之內**;任何 `..` 逃逸出 base → 直接拒絕(HTTP 403)。
   - 概念抄 InRay `inray-paths` path guard。這是把「web 變全機讀檔漏洞」擋掉的唯一防線,**不靠 prompt,靠 code**。
   - 寫入面收斂:Chat 只能寫 `<repo>/doc/chat/`;其餘寫入逐一在 SPEC 明列才開放。
-- 預設綁 `127.0.0.1`(loopback)。設 `HOST` 環境變數可改綁特定介面;對外時**綁該介面 IP 而非 `0.0.0.0`**(例:`HOST=100.114.93.81` 只在 tailnet 內可見,不全開)。
+- **預設綁 `127.0.0.1`(loopback)**。設 `HOST` 環境變數可改綁定位址。
+  - **正式部署(本機 kirin-desktop)實際綁 `HOST=0.0.0.0`**,開放 tailscale 連入(網址 **http://100.114.93.81:4321**)。本機家用無公網直連,`0.0.0.0` 實際只開 tailscale + LAN,非全網暴露。部署方式見 `RUN.md`「systemd 常駐」+ `deploy/`。
+  - 預設值仍維持 `127.0.0.1`;開放對外屬部署時的顯式決定,由 env 覆寫,不改預設。
   - 注意:tailscale/區網走 **http**(非 https),非 secure context → 瀏覽器 `navigator.clipboard` 失效,複製功能受影響(見 §6)。path guard 仍是唯一實體邊界,不因綁定位址放寬。
 
 ---

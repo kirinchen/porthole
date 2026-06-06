@@ -38,6 +38,33 @@ npm run start          # Fastify serve dist + API,單 port 4321
 
 - **開瀏覽器:`http://127.0.0.1:4321/<repo>`**(如 `/coral`)。
 
+## systemd 常駐(正式部署)
+
+正式部署不靠手動 `npm run start`,而是 **systemd user service** 常駐:開機自啟、crash 自重啟、綁 tailscale。完整記錄見 `deploy/`(`deploy/README.md` + `deploy/porthole.service`)。
+
+### 安裝(一次性)
+
+```bash
+cp deploy/porthole.service ~/.config/systemd/user/porthole.service
+systemctl --user daemon-reload
+systemctl --user enable --now porthole.service
+loginctl enable-linger kirin     # 開機自啟、免登入
+```
+
+### 管理
+
+```bash
+systemctl --user status  porthole
+systemctl --user restart porthole     # ← 改 code / rebuild 後要跑這個
+systemctl --user stop    porthole
+journalctl --user -u porthole -f      # 看 log
+```
+
+> ⚠️ **改 code / rebuild 後務必 restart**:`npm run prod` 重建 `web/dist` 後,**一定要** `systemctl --user restart porthole`,否則 service 跑的仍是舊 dist。
+
+- service 綁 `HOST=0.0.0.0` → 本機 + tailscale(**http://100.114.93.81:4321**)皆可達。
+- 本機家用無公網直連,`0.0.0.0` 實際只開 tailscale + LAN(見 SPEC §2)。
+
 ## 其他指令
 
 ```bash
