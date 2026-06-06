@@ -5,10 +5,11 @@
  *  - 送出 → POST /api/:repo/chat,SSE 逐字串回;後端把紀錄 append 到 doc/chat/<thread>.md
  */
 import { useEffect, useRef, useState } from 'react';
-import { Input, Button, List, Spin, Alert, Typography, Space } from 'antd';
+import { Button, List, Spin, Alert, Typography, Space } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api, type ThreadMeta } from '../lib/api';
+import MentionTextArea from '../components/MentionTextArea';
 
 interface Props {
   repo: string;
@@ -154,18 +155,13 @@ export default function Chat({ repo }: Props) {
 
         <div style={{ borderTop: '1px solid #f0f0f0', padding: 12 }}>
           <Space.Compact style={{ width: '100%' }}>
-            <Input.TextArea
+            <MentionTextArea
+              repo={repo}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={`對 ${repo} 的 agent 說…(Enter 送出,Shift+Enter 換行)`}
-              autoSize={{ minRows: 1, maxRows: 6 }}
-              onPressEnter={(e) => {
-                if (!e.shiftKey) {
-                  e.preventDefault();
-                  void send();
-                }
-              }}
-              data-loc="chat:composer:input"
+              onChange={setInput}
+              onSubmit={() => void send()}
+              placeholder={`對 ${repo} 的 agent 說…（@ 提及檔案,Enter 送出,Shift+Enter 換行)`}
+              disabled={streaming}
             />
             <Button
               type="primary"

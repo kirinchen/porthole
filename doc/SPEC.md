@@ -78,6 +78,10 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 - **紀錄持久化**:每個 thread 寫成一個 markdown 檔到 `<repo>/doc/chat/<thread>.md`(human + assistant 輪流,append)。
 - 取代 `claude-workbench/plugins/chat`(該方案太難用,porthole 不沿用其機制)。
 - thread 列表:讀 `<repo>/doc/chat/*.md`。
+- **composer @ mention 檔案**:輸入框打 `@` 觸發檔案 hint 下拉(`data-loc="chat:composer:mention"`)。
+  - 選資料夾續查下一層、`../` 回上層;鍵盤 ↑↓ 選、Enter/Tab 選中、Esc 關(下拉關閉時 Enter 才送出)。
+  - 選檔案插入 `@<repo 相對路徑>`(claude -p 原生吃 `@file`)。
+  - 列檔複用 `GET /api/:repo/tree`;路徑導航受 path-guard 約束,超出 repo root → 403,下拉顯示「已到根」。
 
 ### 4.3 Session
 - 列出 `claude -r` 可恢復的 session。
