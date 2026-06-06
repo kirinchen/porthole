@@ -133,11 +133,34 @@ porthole/
 
 ---
 
-## 9. 待 Kirin 拍板 / BDA 出細設
+## 9. 細設定案(BDA 提案,待 Kelp/Kirin 驗收)
 
-- ⚠️ Session tab 的 tmux 生命週期細部設計(由 BDA 提案,Kelp 驗收後實作)。
-- dev / prod 啟動方式(dev:vite + proxy 到 Fastify;prod:Fastify serve build)細節。
-- Chat thread 檔名規則與 markdown 格式定案。
+### 9.1 Session tab — claude session 列舉 + tmux 生命週期
+
+- **session 列舉(deterministic-first,不走互動式 `claude -r`)**:claude 把每個 session 存成
+  `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl`,`encoded-cwd` = repoRoot 把 `/`、`\` 換成 `-`。
+  一個 `.jsonl` = 一個可恢復 session。porthole 讀該目錄列出 id / mtime / 首則 user 訊息當標題。
+- **tmux 命名**:`porthole_<repo>_<id8>`,只留 `[A-Za-z0-9_]`(tmux 安全)。前綴 `porthole_` 供列舉/收斂。
+- **生命週期**:
+  - 建立:`tmux new-session -d -s <name> -c <repoRoot> 'claude --resume <id>'`(背景 detached)。
+  - attach:後端用 `node-pty` spawn `tmux attach -t <name>`,接到 WS `/ws/tmux/:name`,前端 xterm.js。
+  - detach:前端關閉 WS(切走/關 tab)→ tmux client 退出,**session 仍在背景續跑**(本 tab 的目的)。
+  - 收掉:`DELETE /api/tmux/:name`(名稱須符 `porthole_*`)→ `tmux kill-session`。
+  - porthole **不自動收** session;由使用者顯式收掉,或機器重開時自然消失。
+- **WS 協定**:client→server JSON 控制(`{type:'data'|'resize'}`);server→client 純文字 = pty 輸出。
+
+### 9.2 dev / prod 啟動
+
+- **dev**:`tsx watch` 跑 Fastify(4321,REST/SSE/WS)+ Vite dev(5173,proxy `/api`、`/ws` 到 4321)。
+  瀏覽器開 `http://127.0.0.1:5173/<repo>`。
+- **prod**:`vite build` → `web/dist`;Fastify serve dist(含 SPA fallback,非 `/api`、`/ws` 回 `index.html`)+ API,單 port 4321。瀏覽器開 `http://127.0.0.1:4321/<repo>`。
+- 詳見 `RUN.md`。
+
+### 9.3 Chat thread 檔名與格式
+
+- 檔名:`<repo>/doc/chat/<thread>.md`;`<thread>` 收斂為 `[A-Za-z0-9_-]`(≤64 字),空則 `default`,
+  再經 path-guard 二次把關(寫入面只允許 `doc/chat/`)。
+- 格式:human / assistant 輪流 append,每段 `## 🧑 Human · <ISO>` / `## 🤖 Assistant · <ISO>` 標頭 + 內容。
 
 ---
 

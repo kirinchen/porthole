@@ -1,0 +1,70 @@
+/**
+ * api client — 對 Fastify 後端的薄封裝。
+ * repo 走 URL path 第一段;API 路徑 /api/:repo/...
+ */
+
+export interface TreeItem {
+  name: string;
+  path: string;
+  type: 'dir' | 'file';
+}
+
+export interface ClaudeSession {
+  id: string;
+  mtime: number;
+  title: string;
+}
+
+export interface ThreadMeta {
+  name: string;
+  mtime: number;
+}
+
+async function jget<T>(url: string): Promise<T> {
+  const r = await fetch(url);
+  if (!r.ok) {
+    const body = (await r.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `HTTP ${r.status}`);
+  }
+  return (await r.json()) as T;
+}
+
+export const api = {
+  repos: () => jget<{ base: string; repos: string[] }>('/api/repos'),
+
+  tree: (repo: string, path = '.') =>
+    jget<{ items: TreeItem[] }>(`/api/${repo}/tree?path=${encodeURIComponent(path)}`),
+
+  file: (repo: string, path: string) =>
+    jget<{ content: string; markdown: boolean; ext: string }>(
+      `/api/${repo}/file?path=${encodeURIComponent(path)}`,
+    ),
+
+  threads: (repo: string) => jget<{ threads: ThreadMeta[] }>(`/api/${repo}/chat/threads`),
+
+  thread: (repo: string, name: string) =>
+    jget<{ content: string }>(`/api/${repo}/chat/threads/${encodeURIComponent(name)}`),
+
+  sessions: (repo: string) => jget<{ sessions: ClaudeSession[] }>(`/api/${repo}/sessions`),
+
+  startSession: async (repo: string, id: string) => {
+    const r = await fetch(`/api/${repo}/sessions/${encodeURIComponent(id)}/start`, {
+      method: 'POST',
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return (await r.json()) as { name: string };
+  },
+
+  tmuxList: () => jget<{ sessions: string[] }>('/api/tmux'),
+
+  tmuxKill: async (name: string) => {
+    const r = await fetch(`/api/tmux/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  },
+};
+
+/** WebSocket URL(同 origin,dev 由 vite proxy 轉)。 */
+export function wsUrl(path: string): string {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${proto}://${location.host}${path}`;
+}
