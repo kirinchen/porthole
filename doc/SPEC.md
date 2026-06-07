@@ -63,6 +63,9 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 └──────────┴─────────────────────────────────┘
 ```
 
+- **URL 狀態**:repo 走 pathname 第一段(`/coral`),active tab 走 hash(`/coral#chat`)。
+  reload / bookmark / 分享 / 上一頁皆可還原 repo+tab;hash 純前端,server 不參與。
+
 ---
 
 ## 4. 四個 Tab 規格

@@ -27,14 +27,22 @@ const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'cli', label: 'CLI', icon: <CodeOutlined /> },
 ];
 
+const TAB_KEYS: TabKey[] = ['explore', 'chat', 'session', 'cli'];
+
 function repoFromUrl(): string {
   return decodeURIComponent(location.pathname.split('/').filter(Boolean)[0] ?? '');
+}
+
+/** tab 由 URL hash 帶(`/coral#chat`);非法值退回 explore。 */
+function tabFromUrl(): TabKey {
+  const h = decodeURIComponent(location.hash.replace(/^#/, ''));
+  return (TAB_KEYS as string[]).includes(h) ? (h as TabKey) : 'explore';
 }
 
 export default function App() {
   const [repos, setRepos] = useState<string[]>([]);
   const [repo, setRepo] = useState<string>(repoFromUrl());
-  const [tab, setTab] = useState<TabKey>('explore');
+  const [tab, setTab] = useState<TabKey>(tabFromUrl());
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const screens = Grid.useBreakpoint();
@@ -54,12 +62,34 @@ export default function App() {
       });
   }, []);
 
-  // repo → URL
+  // repo → URL pathname(換 repo 進歷史,保留當前 tab hash)
   useEffect(() => {
     if (repo && repoFromUrl() !== repo) {
-      history.pushState(null, '', `/${encodeURIComponent(repo)}`);
+      history.pushState(null, '', `/${encodeURIComponent(repo)}#${tab}`);
     }
-  }, [repo]);
+  }, [repo, tab]);
+
+  // tab → URL hash(切 tab 只改 hash,不灌歷史)
+  useEffect(() => {
+    if (location.hash !== `#${tab}`) {
+      history.replaceState(null, '', `${location.pathname}#${tab}`);
+    }
+  }, [tab]);
+
+  // 上一頁/下一頁、手改 hash → 同步回 state
+  useEffect(() => {
+    const sync = () => {
+      const r = repoFromUrl();
+      if (r) setRepo(r);
+      setTab(tabFromUrl());
+    };
+    window.addEventListener('popstate', sync);
+    window.addEventListener('hashchange', sync);
+    return () => {
+      window.removeEventListener('popstate', sync);
+      window.removeEventListener('hashchange', sync);
+    };
+  }, []);
 
   const main = useMemo(() => {
     if (!repo) return <Alert type="info" message="basePath 下沒有可用的 repo" />;
