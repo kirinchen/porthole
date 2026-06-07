@@ -67,7 +67,12 @@ export default function MentionTextArea({
 
   const open = mention !== null;
   const { dir, prefix } = mention ? splitQuery(mention.query) : { dir: '.', prefix: '' };
-  const filtered = items.filter((it) => it.name.toLowerCase().startsWith(prefix.toLowerCase()));
+  // 非 repo root 時於頂端插入合成的 `..`(上一層);手打 `..` 也會被 prefix 過濾到它。
+  const listed: TreeItem[] =
+    dir !== '.' && !tooDeep
+      ? [{ name: '..', path: `${dir}/..`, type: 'dir' }, ...items]
+      : items;
+  const filtered = listed.filter((it) => it.name.toLowerCase().startsWith(prefix.toLowerCase()));
 
   // 取得底層 textarea DOM(設游標位置用)。
   const textArea = () => ref.current?.resizableTextArea?.textArea ?? null;
@@ -133,11 +138,17 @@ export default function MentionTextArea({
     setMention(detect(next, e.target.selectionStart));
   };
 
-  // 選中一項:資料夾補 `/` 續查,檔案插入後關閉。
+  // 選中一項:`..` 乾淨回上一層,資料夾補 `/` 續查,檔案插入後關閉。
   const choose = (item: TreeItem) => {
     if (!mention) return;
-    const newQuery =
-      (dir === '.' ? '' : dir + '/') + item.name + (item.type === 'dir' ? '/' : '');
+    let newQuery: string;
+    if (item.name === '..' && item.type === 'dir') {
+      const slash = dir.lastIndexOf('/');
+      const parent = slash === -1 ? '.' : dir.slice(0, slash);
+      newQuery = parent === '.' ? '' : parent + '/';
+    } else {
+      newQuery = (dir === '.' ? '' : dir + '/') + item.name + (item.type === 'dir' ? '/' : '');
+    }
     const ta = textArea();
     const cursor = ta ? ta.selectionStart : mention.at + 1 + mention.query.length;
     const tail = value.slice(cursor);
@@ -239,10 +250,16 @@ export default function MentionTextArea({
                 ) : (
                   <FileOutlined style={{ color: '#8c8c8c' }} />
                 )}
-                <span>
-                  {it.name}
-                  {it.type === 'dir' ? '/' : ''}
-                </span>
+                {it.name === '..' && it.type === 'dir' ? (
+                  <span>
+                    ../ <span style={{ color: '#999', fontSize: 12 }}>上一層</span>
+                  </span>
+                ) : (
+                  <span>
+                    {it.name}
+                    {it.type === 'dir' ? '/' : ''}
+                  </span>
+                )}
               </div>
             ))
           )}
