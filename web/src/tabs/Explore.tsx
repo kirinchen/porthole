@@ -2,8 +2,9 @@
  * Explore tab — files tree(lazy)+ 點檔預覽(markdown 走 react-markdown,其餘純文字)。唯讀。
  */
 import { useEffect, useState } from 'react';
-import { Tree, Empty, Spin, Alert } from 'antd';
+import { Tree, Empty, Spin, Alert, Grid, Drawer, Button, Typography } from 'antd';
 import type { TreeDataNode } from 'antd';
+import { MenuOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api } from '../lib/api';
@@ -28,6 +29,9 @@ export default function Explore({ repo }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [sel, setSel] = useState<{ path: string; content: string; markdown: boolean } | null>(null);
   const [loadingFile, setLoadingFile] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md; // <768px:檔案樹收進抽屜,預覽吃滿寬
 
   useEffect(() => {
     setTree([]);
@@ -55,6 +59,7 @@ export default function Explore({ repo }: Props) {
     try {
       const f = await api.file(repo, n.path);
       setSel({ path: n.path, content: f.content, markdown: f.markdown });
+      setDrawerOpen(false); // 手機:選檔後關抽屜露出預覽
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -62,25 +67,67 @@ export default function Explore({ repo }: Props) {
     }
   };
 
+  const treePanel = (
+    <>
+      {err && <Alert type="error" message={err} style={{ marginBottom: 8 }} />}
+      {tree.length === 0 && !err ? (
+        <Spin />
+      ) : (
+        <Tree.DirectoryTree treeData={tree} loadData={onLoadData} onSelect={onSelect} blockNode />
+      )}
+    </>
+  );
+
   return (
     <div style={{ display: 'flex', height: '100%' }} data-loc="explore:root">
+      {!isMobile && (
+        <div
+          style={{ width: 300, overflow: 'auto', borderRight: '1px solid #f0f0f0', padding: 8 }}
+          data-loc="explore:tree"
+        >
+          {treePanel}
+        </div>
+      )}
+
+      {isMobile && (
+        <Drawer
+          title="檔案"
+          placement="left"
+          width={300}
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          styles={{ body: { padding: 8 } }}
+          data-loc="explore:tree:drawer"
+        >
+          {treePanel}
+        </Drawer>
+      )}
+
       <div
-        style={{ width: 300, overflow: 'auto', borderRight: '1px solid #f0f0f0', padding: 8 }}
-        data-loc="explore:tree"
+        style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}
+        data-loc="explore:preview"
       >
-        {err && <Alert type="error" message={err} style={{ marginBottom: 8 }} />}
-        {tree.length === 0 && !err ? (
-          <Spin />
-        ) : (
-          <Tree.DirectoryTree
-            treeData={tree}
-            loadData={onLoadData}
-            onSelect={onSelect}
-            blockNode
-          />
+        {isMobile && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '8px 12px',
+              borderBottom: '1px solid #f0f0f0',
+            }}
+          >
+            <Button
+              icon={<MenuOutlined />}
+              onClick={() => setDrawerOpen(true)}
+              data-loc="explore:tree:toggle"
+            />
+            <Typography.Text ellipsis style={{ flex: 1, minWidth: 0 }}>
+              {sel?.path ?? '選一個檔案'}
+            </Typography.Text>
+          </div>
         )}
-      </div>
-      <div style={{ flex: 1, overflow: 'auto', padding: 16 }} data-loc="explore:preview">
+        <div style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: 16 }}>
         {loadingFile ? (
           <Spin />
         ) : !sel ? (
@@ -94,6 +141,7 @@ export default function Explore({ repo }: Props) {
             {sel.content}
           </pre>
         )}
+        </div>
       </div>
     </div>
   );
