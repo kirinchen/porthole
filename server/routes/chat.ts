@@ -9,6 +9,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { guard } from '../lib/path-guard.ts';
 import { runClaude } from '../lib/claude-p.ts';
@@ -23,6 +24,33 @@ function safeThread(name: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+/** claude 產出的主題 → kebab-case slug(只留小寫英數 + 連字號)。 */
+function slugify(raw: string): string {
+  const line = raw.split('\n').map((s) => s.trim()).find(Boolean) ?? '';
+  return line
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+    .replace(/-+$/g, '');
+}
+
+/** 用 claude -p 分析對話開頭,產生英文 kebab-case 主題 slug。 */
+function genTitle(content: string, cwd: string): Promise<string> {
+  const excerpt = content.slice(0, 1500);
+  const prompt =
+    '根據下面這段對話的開頭,產生一個能代表主題的檔名 slug:' +
+    '3-6 個英文單字、全小寫、用連字號連接(kebab-case),' +
+    '只輸出 slug 本身,不要引號、說明或副檔名。\n\n' +
+    excerpt;
+  return new Promise((resolve) => {
+    let out = '';
+    const run = runClaude(prompt, cwd);
+    run.onChunk((t) => (out += t));
+    run.onEnd(() => resolve(out));
+  });
 }
 
 export default async function chatRoutes(app: FastifyInstance) {
@@ -55,6 +83,38 @@ export default async function chatRoutes(app: FastifyInstance) {
         return { content };
       } catch {
         return reply.code(404).send({ error: 'thread not found' });
+      }
+    },
+  );
+
+  // 用 claude 分析對話主題,把 thread 改成貼切的 slug(寫入面仍鎖 doc/chat/)。
+  app.post<{ Params: { repo: string; thread: string } }>(
+    '/api/:repo/chat/threads/:thread/rename',
+    async (req, reply) => {
+      const repo = req.params.repo;
+      const oldName = safeThread(req.params.thread);
+      const oldFile = guard.resolveInRepo(repo, `${CHAT_DIR}/${oldName}.md`);
+      let content: string;
+      try {
+        content = await fs.readFile(oldFile, 'utf8');
+      } catch {
+        return reply.code(404).send({ error: 'thread not found' });
+      }
+
+      const base = slugify(await genTitle(content, guard.repoRoot(repo)));
+      if (!base) return { name: oldName }; // 生不出主題就維持原名
+
+      // 命名衝突 → 加 -2/-3…;與原名相同則免改。
+      let name = base;
+      for (let i = 2; ; i++) {
+        const candidate = safeThread(name);
+        if (candidate === oldName) return { name: oldName };
+        const target = guard.resolveInRepo(repo, `${CHAT_DIR}/${candidate}.md`);
+        if (!existsSync(target)) {
+          await fs.rename(oldFile, target);
+          return { name: candidate };
+        }
+        name = `${base}-${i}`;
       }
     },
   );

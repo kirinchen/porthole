@@ -45,6 +45,14 @@ export const api = {
   thread: (repo: string, name: string) =>
     jget<{ content: string }>(`/api/${repo}/chat/threads/${encodeURIComponent(name)}`),
 
+  renameThread: async (repo: string, name: string) => {
+    const r = await fetch(`/api/${repo}/chat/threads/${encodeURIComponent(name)}/rename`, {
+      method: 'POST',
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return (await r.json()) as { name: string };
+  },
+
   sessions: (repo: string) => jget<{ sessions: ClaudeSession[] }>(`/api/${repo}/sessions`),
 
   startSession: async (repo: string, id: string) => {

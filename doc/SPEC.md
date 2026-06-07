@@ -79,6 +79,7 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 - 透過 `claude -p` 跟 active repo 的 agent 對話(coral → coral 前台助理)。
 - 子程序:`claude -p "<prompt>"`,CWD = active repo root,stdout 以 **SSE** 串回前端逐字顯示。
 - **紀錄持久化**:每個 thread 寫成一個 markdown 檔到 `<repo>/doc/chat/<thread>.md`(human + assistant 輪流,append)。
+- **首輪自動命名**:新 thread 預設 `thread-<ts>`;第一輪回覆完成後,後端 `POST .../threads/:thread/rename` 用 `claude -p` 分析對話主題產生英文 kebab-case slug,在 `doc/chat/` 內 `fs.rename`(path-guard + 衝突加 `-N`)。生不出或同名則維持原名。
 - 取代 `claude-workbench/plugins/chat`(該方案太難用,porthole 不沿用其機制)。
 - thread 列表:讀 `<repo>/doc/chat/*.md`。
 - **composer @ mention 檔案**:輸入框打 `@` 觸發檔案 hint 下拉(`data-loc="chat:composer:mention"`)。

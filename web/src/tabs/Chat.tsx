@@ -66,6 +66,7 @@ export default function Chat({ repo }: Props) {
   const send = async () => {
     const prompt = input.trim();
     if (!prompt || streaming) return;
+    const firstTurn = turns.length === 0; // 首輪 → 回覆後請 agent 依主題命名
     setInput('');
     setErr(null);
     setTurns((t) => [...t, { role: 'human', text: prompt }, { role: 'assistant', text: '' }]);
@@ -94,6 +95,15 @@ export default function Chat({ repo }: Props) {
           console.warn('[claude stderr]', (data as { text: string }).text);
         }
       });
+      // 首輪結束且 thread 仍是自動名 → 讓 agent 依主題改名
+      if (firstTurn && /^thread-\d+$/.test(active)) {
+        try {
+          const { name } = await api.renameThread(repo, active);
+          if (name !== active) setActive(name);
+        } catch {
+          /* 命名失敗不影響對話 */
+        }
+      }
       loadThreads();
     } catch (e) {
       setErr((e as Error).message);
