@@ -78,6 +78,10 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 - **編輯**:預覽區「編輯」鈕 → textarea 改原始內容 → 儲存(`PUT /api/:repo/file`)。
 - **新增**:檔案樹「新檔」鈕 → 輸入相對路徑(中間目錄自動建立)→ 編輯後儲存。
 - 寫入受 path-guard 鎖在 active repo root 內(見 §2 寫入面)。
+- **mermaid**:預覽渲染 ```mermaid 圖(securityLevel=strict)。flowchart 額外提供 **GUI 編輯**
+  (React Flow + dagre):雙擊節點/邊改字、拖把手連線、Delete 刪、新增節點;「套用」正規化重寫該
+  區塊回寫檔案。支援子集(矩形節點 + 有向邊 + 邊標籤 + 方向);subgraph/形狀/樣式退回純文字編輯。
+  mermaid / React Flow 皆 lazy-load,不進主 bundle。
 
 ### 4.2 Chat
 - 透過 `claude -p` 跟 active repo 的 agent 對話(coral → coral 前台助理)。
@@ -86,6 +90,7 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 - **首輪自動命名**:新 thread 預設 `thread-<ts>`;第一輪回覆完成後,後端 `POST .../threads/:thread/rename` 用 `claude -p` 分析對話主題產生英文 kebab-case slug,在 `doc/chat/` 內 `fs.rename`(path-guard + 衝突加 `-N`)。生不出或同名則維持原名。
 - 取代 `claude-workbench/plugins/chat`(該方案太難用,porthole 不沿用其機制)。
 - thread 列表:讀 `<repo>/doc/chat/*.md`。
+- agent 回覆中的 ```mermaid 區塊同樣渲染成圖(共用 Explore 的 Markdown 元件;Chat 僅呈現,不提供 GUI 編輯)。
 - **composer @ mention 檔案**:輸入框打 `@` 觸發檔案 hint 下拉(`data-loc="chat:composer:mention"`)。
   - 選資料夾續查下一層、`../` 回上層;鍵盤 ↑↓ 選、Enter/Tab 選中、Esc 關(下拉關閉時 Enter 才送出)。
   - 選檔案插入 `@<repo 相對路徑>`(claude -p 原生吃 `@file`)。

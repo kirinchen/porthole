@@ -13,12 +13,13 @@ import {
   CloseOutlined,
   FileAddOutlined,
 } from '@ant-design/icons';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { api } from '../lib/api';
+import Markdown from '../components/Markdown';
+import { replaceMermaidBlock } from '../lib/mermaidFlow';
 
-// CM6 編輯器較重 → lazy load,只有編輯 md 時才拉這個 chunk(守「薄」)。
+// 較重的元件 lazy load,只有真的用到才拉 chunk(守「薄」)。
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor'));
+const FlowEditor = lazy(() => import('../components/FlowEditor'));
 
 interface Props {
   repo: string;
@@ -58,6 +59,7 @@ export default function Explore({ repo }: Props) {
   const [note, setNote] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
   const [newPath, setNewPath] = useState('');
+  const [flowCode, setFlowCode] = useState<string | null>(null); // GUI 編輯中的 mermaid 區塊
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md; // <768px:檔案樹收進抽屜,預覽吃滿寬
 
@@ -135,6 +137,20 @@ export default function Explore({ repo }: Props) {
       setSaveErr((e as Error).message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  // GUI 流程圖套用:正規化重寫該 mermaid 區塊 → 寫回檔案。
+  const applyFlow = async (newCode: string) => {
+    if (!sel || flowCode == null) return;
+    const updated = replaceMermaidBlock(sel.content, flowCode, newCode);
+    try {
+      await api.writeFile(repo, sel.path, updated);
+      setSel({ ...sel, content: updated });
+      setNote(`已更新流程圖 · ${sel.path}`);
+      setFlowCode(null);
+    } catch (e) {
+      setSaveErr((e as Error).message);
     }
   };
 
@@ -287,7 +303,7 @@ export default function Explore({ repo }: Props) {
             <Empty description="選一個檔案預覽" />
           ) : sel.markdown ? (
             <div className="md-preview">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{sel.content}</ReactMarkdown>
+              <Markdown onMermaidEdit={(c) => setFlowCode(c)}>{sel.content}</Markdown>
             </div>
           ) : (
             <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>
@@ -319,6 +335,22 @@ export default function Explore({ repo }: Props) {
           placeholder="例如 doc/note/idea.md"
           data-loc="explore:file:new:path"
         />
+      </Modal>
+
+      <Modal
+        title="流程圖 GUI 編輯"
+        open={flowCode !== null}
+        onCancel={() => setFlowCode(null)}
+        width="90%"
+        footer={null}
+        destroyOnClose
+        data-loc="explore:flow:modal"
+      >
+        <Suspense fallback={<Spin />}>
+          {flowCode !== null && (
+            <FlowEditor code={flowCode} onSave={applyFlow} onClose={() => setFlowCode(null)} />
+          )}
+        </Suspense>
       </Modal>
     </div>
   );

@@ -7,10 +7,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, List, Spin, Alert, Typography, Space, Grid, Drawer } from 'antd';
 import { MenuOutlined } from '@ant-design/icons';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { api, type ThreadMeta } from '../lib/api';
 import MentionTextArea from '../components/MentionTextArea';
+import Markdown from '../components/Markdown';
 
 interface Props {
   repo: string;
@@ -204,11 +203,7 @@ export default function Chat({ repo }: Props) {
             <div key={i} style={{ marginBottom: 16 }}>
               <Typography.Text strong>{turn.role === 'human' ? '🧑 你' : '🤖 agent'}</Typography.Text>
               <div className="md-preview" style={{ marginTop: 4 }}>
-                {turn.text ? (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.text}</ReactMarkdown>
-                ) : (
-                  <Spin size="small" />
-                )}
+                {turn.text ? <Markdown>{turn.text}</Markdown> : <Spin size="small" />}
               </div>
             </div>
           ))}
