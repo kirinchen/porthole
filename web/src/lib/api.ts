@@ -40,6 +40,18 @@ export const api = {
       `/api/${repo}/file?path=${encodeURIComponent(path)}`,
     ),
 
+  writeFile: async (repo: string, path: string, content: string) => {
+    const r = await fetch(`/api/${repo}/file`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, content }),
+    });
+    if (!r.ok) {
+      const b = (await r.json().catch(() => ({}))) as { error?: string };
+      throw new Error(b.error ?? `HTTP ${r.status}`);
+    }
+  },
+
   threads: (repo: string) => jget<{ threads: ThreadMeta[] }>(`/api/${repo}/chat/threads`),
 
   thread: (repo: string, name: string) =>

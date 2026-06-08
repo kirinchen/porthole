@@ -78,7 +78,7 @@ PORT=5000 npm run start                    # 換 port
 
 | Tab | 做什麼 |
 |-----|--------|
-| Explore | active repo 檔案樹 + 點檔預覽(markdown 渲染),唯讀 |
+| Explore | active repo 檔案樹 + 點檔預覽(markdown 渲染)+ 編輯 / 新增檔(寫入受 path-guard) |
 | Chat | `claude -p` 對話,SSE 逐字串流,紀錄寫 `<repo>/doc/chat/<thread>.md` |
 | Session | 列 claude 可恢復 session;點一個 → tmux 背景跑 + xterm attach/detach |
 | CLI | PTY console(CWD = repo root),WebSocket + xterm.js |

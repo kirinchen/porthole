@@ -3,7 +3,8 @@
  * GET /api/repos                     列 basePath 下的 repo
  * GET /api/:repo/tree?path=<rel>     列某目錄的子項(lazy,一層)
  * GET /api/:repo/file?path=<rel>     讀檔(回傳內容 + 是否 markdown)
- * 全部經 path-guard;逃逸 → 403。
+ * PUT /api/:repo/file                寫檔(body {path, content};可覆寫既存或新增)
+ * 全部經 path-guard;逃逸 → 403。寫入面鎖在 active repo root 內(SPEC §2)。
  */
 import type { FastifyInstance } from 'fastify';
 import fs from 'node:fs/promises';
@@ -66,6 +67,30 @@ export default async function fsRoutes(app: FastifyInstance) {
       const ext = path.extname(target).toLowerCase();
       const markdown = ext === '.md' || ext === '.markdown';
       return { content, markdown, ext };
+    },
+  );
+
+  // 寫檔:path-guard 鎖在 repo root 內;可覆寫既存或新增(含建中間目錄)。
+  app.put<{ Params: { repo: string }; Body: { path?: string; content?: string } }>(
+    '/api/:repo/file',
+    { bodyLimit: 4 * 1024 * 1024 }, // 容納 2MB 檔 + JSON 包裝
+    async (req, reply) => {
+      const rel = req.body?.path ?? '';
+      const content = req.body?.content ?? '';
+      if (!rel) return reply.code(400).send({ error: 'path required' });
+      if (Buffer.byteLength(content, 'utf8') > MAX_FILE) {
+        return reply.code(413).send({ error: 'content too large' });
+      }
+      const target = guard.resolveInRepo(req.params.repo, rel);
+      try {
+        const st = await fs.stat(target);
+        if (st.isDirectory()) return reply.code(400).send({ error: 'is a directory' });
+      } catch {
+        /* 不存在 → 新檔,允許 */
+      }
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, content, 'utf8');
+      return { ok: true };
     },
   );
 }
