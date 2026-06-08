@@ -48,6 +48,7 @@ export default function Explore({ repo }: Props) {
   const [tree, setTree] = useState<Node[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [sel, setSel] = useState<Selected | null>(null);
+  const [selPath, setSelPath] = useState<string | null>(null); // 最後選取的節點(檔或資料夾)→ 標題
   const [loadingFile, setLoadingFile] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -70,6 +71,7 @@ export default function Explore({ repo }: Props) {
   useEffect(() => {
     setTree([]);
     setSel(null);
+    setSelPath(null);
     setEditing(false);
     setErr(null);
     reloadTree();
@@ -86,7 +88,8 @@ export default function Explore({ repo }: Props) {
 
   const onSelect = async (_keys: React.Key[], info: { node: TreeDataNode }) => {
     const n = info.node as Node;
-    if (!n.isLeaf) return;
+    setSelPath(n.path); // 標題同步選取的節點(檔或資料夾)
+    if (!n.isLeaf) return; // 資料夾:只更新標題,不載預覽
     setLoadingFile(true);
     setErr(null);
     setEditing(false);
@@ -145,6 +148,7 @@ export default function Explore({ repo }: Props) {
     setNote(null);
     setSaveErr(null);
     setSel({ path: p, content: '', markdown: isMd(p), isNew: true });
+    setSelPath(p);
     setDraft('');
     setEditing(true);
   };
@@ -198,7 +202,7 @@ export default function Explore({ repo }: Props) {
         style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}
         data-loc="explore:preview"
       >
-        {(isMobile || sel) && (
+        {(isMobile || sel || selPath) && (
           <div
             style={{
               display: 'flex',
@@ -217,8 +221,8 @@ export default function Explore({ repo }: Props) {
               />
             )}
             <Typography.Text ellipsis style={{ flex: 1, minWidth: 0 }}>
-              {sel?.path ?? '選一個檔案'}
-              {sel?.isNew ? ' (新檔)' : ''}
+              {selPath ?? '選一個項目'}
+              {sel?.isNew && selPath === sel.path ? ' (新檔)' : ''}
             </Typography.Text>
             {sel &&
               (editing ? (
