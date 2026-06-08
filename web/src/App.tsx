@@ -119,6 +119,7 @@ export default function App() {
         }}
         data-loc="app:header"
       >
+        <img src="/favicon.svg" width={24} height={24} alt="" data-loc="app:header:logo" />
         <Typography.Text strong style={{ color: '#fff', fontSize: 16 }}>
           porthole
         </Typography.Text>
