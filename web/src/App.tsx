@@ -69,6 +69,11 @@ export default function App() {
     }
   }, [repo, tab]);
 
+  // repo → Chrome 分頁標題
+  useEffect(() => {
+    document.title = repo ? `${repo} · porthole` : 'porthole · 舷窗';
+  }, [repo]);
+
   // tab → URL hash(切 tab 只改 hash,不灌歷史)
   useEffect(() => {
     if (location.hash !== `#${tab}`) {
