@@ -6,22 +6,27 @@
  *
  * 作法:一個 ViewPlugin 走 syntaxTree,對非 active 行的語法 mark 加 Decoration.replace
  *   隱藏、對內容加 Decoration.mark/line 上樣式;active 行不隱藏(露出原始碼供編輯)。
+ *   mermaid fenced block 整塊換成互動 widget(自帶 預覽/編輯/GUI tabs),套用直接改寫文件。
  *
  * 非 markdown 檔不走這裡(Explore 用純 textarea)。父層以 key=path 強制每檔重掛。
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, createElement } from 'react';
 import {
   EditorView,
   Decoration,
   type DecorationSet,
   ViewPlugin,
   type ViewUpdate,
+  WidgetType,
   keymap,
 } from '@codemirror/view';
-import { EditorState, type Range } from '@codemirror/state';
+import { EditorState, StateField, type Range } from '@codemirror/state';
+import type { SyntaxNode } from '@lezer/common';
 import { syntaxTree } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { createRoot, type Root } from 'react-dom/client';
+import MermaidBlock from './MermaidBlock';
 
 interface Props {
   value: string;
@@ -30,6 +35,108 @@ interface Props {
 
 /** 隱藏語法符號(零寬替換)。 */
 const HIDE = Decoration.replace({});
+
+/** fenced code 的語言標記(```後那段)。 */
+function fenceInfo(state: EditorState, node: SyntaxNode): string {
+  const info = node.getChild('CodeInfo');
+  return info ? state.doc.sliceString(info.from, info.to).trim() : '';
+}
+
+/** fenced code 的內容(兩道 ``` 之間)。 */
+function fenceCode(state: EditorState, node: SyntaxNode): string {
+  const t = node.getChild('CodeText');
+  return t ? state.doc.sliceString(t.from, t.to) : '';
+}
+
+/** 找第 index 個 mermaid fenced block 的 from/to(全文件,順序與渲染一致)。 */
+function findMermaidBlock(state: EditorState, index: number): { from: number; to: number } | null {
+  let i = 0;
+  let found: { from: number; to: number } | null = null;
+  syntaxTree(state).iterate({
+    enter: (node) => {
+      if (node.name === 'FencedCode') {
+        if (fenceInfo(state, node.node) === 'mermaid') {
+          if (i === index) found = { from: node.from, to: node.to };
+          i++;
+        }
+        return false;
+      }
+      return undefined;
+    },
+  });
+  return found;
+}
+
+/** mermaid 區塊套用(編輯/GUI)→ 改寫文件中對應 fenced block。 */
+function applyMermaidBlock(view: EditorView, index: number, newCode: string): void {
+  const range = findMermaidBlock(view.state, index);
+  if (!range) return;
+  const insert = '```mermaid\n' + newCode.replace(/\s+$/, '') + '\n```';
+  view.dispatch({ changes: { from: range.from, to: range.to, insert } });
+}
+
+/** 把 mermaid block 渲染成互動 box(React root 掛進 CM6 widget)。 */
+class MermaidWidget extends WidgetType {
+  constructor(
+    readonly code: string,
+    readonly index: number,
+  ) {
+    super();
+  }
+  eq(o: MermaidWidget) {
+    return o.code === this.code && o.index === this.index;
+  }
+  toDOM(view: EditorView) {
+    const dom = document.createElement('div');
+    dom.setAttribute('data-loc', 'explore:edit:mermaid');
+    const root = createRoot(dom);
+    root.render(
+      createElement(MermaidBlock, {
+        code: this.code,
+        onApply: (nc: string) => applyMermaidBlock(view, this.index, nc),
+      }),
+    );
+    (dom as unknown as { _root: Root })._root = root;
+    return dom;
+  }
+  destroy(dom: HTMLElement) {
+    const root = (dom as unknown as { _root?: Root })._root;
+    if (root) setTimeout(() => void root.unmount(), 0); // 避免在 render 期間 unmount
+  }
+  ignoreEvent() {
+    return true; // widget 自行處理互動,不當成編輯器事件
+  }
+}
+
+/** mermaid block widget 是 block / 跨行 replace → 只能走 StateField(不可由 plugin 提供)。 */
+function buildMermaidDecos(state: EditorState): DecorationSet {
+  const ranges: Range<Decoration>[] = [];
+  let i = 0;
+  syntaxTree(state).iterate({
+    enter: (node) => {
+      if (node.name === 'FencedCode') {
+        if (fenceInfo(state, node.node) === 'mermaid') {
+          const code = fenceCode(state, node.node);
+          const from = state.doc.lineAt(node.from).from;
+          const to = state.doc.lineAt(node.to).to;
+          ranges.push(
+            Decoration.replace({ widget: new MermaidWidget(code, i), block: true }).range(from, to),
+          );
+          i++;
+        }
+        return false;
+      }
+      return undefined;
+    },
+  });
+  return Decoration.set(ranges, true);
+}
+
+const mermaidField = StateField.define<DecorationSet>({
+  create: (state) => buildMermaidDecos(state),
+  update: (value, tr) => (tr.docChanged ? buildMermaidDecos(tr.state) : value),
+  provide: (f) => EditorView.decorations.from(f),
+});
 
 /** 依游標位置決定哪些行要露出原始碼,其餘套 live-preview 裝飾。 */
 function buildDecorations(view: EditorView): DecorationSet {
@@ -66,6 +173,9 @@ function buildDecorations(view: EditorView): DecorationSet {
       to,
       enter: (node) => {
         const name = node.name;
+
+        // mermaid block 由上面的 widget 接手,行內樣式跳過(否則與 block 裝飾重疊)。
+        if (name === 'FencedCode' && fenceInfo(view.state, node.node) === 'mermaid') return false;
 
         const h = /^ATXHeading([1-6])$/.exec(name);
         if (h) {
@@ -158,6 +268,7 @@ export default function MarkdownEditor({ value, onChange }: Props) {
           keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
           markdown(),
           EditorView.lineWrapping,
+          mermaidField,
           livePreview,
           theme,
           EditorView.updateListener.of((u) => {

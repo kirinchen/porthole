@@ -75,13 +75,16 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 ### 4.1 Explore
 - files tree(抄 InRay `features/repo`),根 = active repo root。
 - 點檔案 → 右側預覽(markdown 走 remark/rehype 渲染;其他純文字)。
-- **編輯**:預覽區「編輯」鈕 → textarea 改原始內容 → 儲存(`PUT /api/:repo/file`)。
+- **編輯**:預覽區「編輯」鈕 → markdown 走 CM6 Obsidian 式 live-preview、其他純 textarea → 儲存(`PUT /api/:repo/file`)。
 - **新增**:檔案樹「新檔」鈕 → 輸入相對路徑(中間目錄自動建立)→ 編輯後儲存。
 - 寫入受 path-guard 鎖在 active repo root 內(見 §2 寫入面)。
-- **mermaid**:預覽渲染 ```mermaid 圖(securityLevel=strict)。flowchart 額外提供 **GUI 編輯**
-  (React Flow + dagre):雙擊節點/邊改字、拖把手連線、Delete 刪、新增節點;「套用」正規化重寫該
-  區塊回寫檔案。支援子集(矩形節點 + 有向邊 + 邊標籤 + 方向);subgraph/形狀/樣式退回純文字編輯。
-  mermaid / React Flow 皆 lazy-load,不進主 bundle。
+- **mermaid**:
+  - **預覽**:純渲染 ```mermaid 圖(securityLevel=strict),不帶編輯控制(預覽即看)。
+  - **編輯(CM6)**:每個 ```mermaid block 換成互動 box,右上 tab 切 **預覽 / 編輯 / GUI**;
+    flowchart 才有 GUI tab,其餘只有 預覽 / 編輯。套用直接改寫 CM6 文件對應區塊,隨檔案一起存。
+  - GUI(React Flow + dagre):雙擊節點/邊改字、拖把手連線、Delete 刪、新增節點;「套用」正規化重寫。
+    支援子集(矩形節點 + 有向邊 + 邊標籤 + 方向);subgraph/形狀/樣式退回純文字編輯。
+  - mermaid / React Flow 皆 lazy-load,不進主 bundle。
 
 ### 4.2 Chat
 - 透過 `claude -p` 跟 active repo 的 agent 對話(coral → coral 前台助理)。

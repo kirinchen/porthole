@@ -15,7 +15,6 @@ import {
 } from '@ant-design/icons';
 import { api } from '../lib/api';
 import Markdown from '../components/Markdown';
-import { replaceMermaidBlock } from '../lib/mermaidFlow';
 
 // CM6 編輯器較重 → lazy load(守「薄」)。mermaid/FlowEditor 在 MermaidBlock 內按需載入。
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor'));
@@ -135,20 +134,6 @@ export default function Explore({ repo }: Props) {
       setSaveErr((e as Error).message);
     } finally {
       setSaving(false);
-    }
-  };
-
-  // mermaid 區塊(編輯 / GUI)套用 → 取代該區塊 → 寫回檔案。
-  const applyMermaid = async (oldCode: string, newCode: string) => {
-    if (!sel) return;
-    const updated = replaceMermaidBlock(sel.content, oldCode, newCode);
-    if (updated === sel.content) return; // 無變化
-    try {
-      await api.writeFile(repo, sel.path, updated);
-      setSel({ ...sel, content: updated });
-      setNote(`已更新 mermaid · ${sel.path}`);
-    } catch (e) {
-      setSaveErr((e as Error).message);
     }
   };
 
@@ -301,7 +286,7 @@ export default function Explore({ repo }: Props) {
             <Empty description="選一個檔案預覽" />
           ) : sel.markdown ? (
             <div className="md-preview">
-              <Markdown onMermaidChange={applyMermaid}>{sel.content}</Markdown>
+              <Markdown>{sel.content}</Markdown>
             </div>
           ) : (
             <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>
