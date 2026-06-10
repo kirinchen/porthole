@@ -133,10 +133,10 @@ export async function ensureTmux(name: string, cwd: string, claudeSessionId: str
   ]);
 }
 
-/** 開一個全新背景 tmux session,在 repo cwd 內跑裸 `claude`(不帶 --resume)。 */
+/** 開一個全新背景 tmux session(裸 shell,cwd = repo root);要跑 claude 由使用者自行下。 */
 export async function startFreshTmux(name: string, cwd: string): Promise<void> {
   if (await tmuxExists(name)) return;
-  await pexec('tmux', ['new-session', '-d', '-s', name, '-c', cwd, 'claude']);
+  await pexec('tmux', ['new-session', '-d', '-s', name, '-c', cwd]);
 }
 
 /** 列出 porthole 開的 tmux session 名稱。 */

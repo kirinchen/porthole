@@ -74,6 +74,17 @@ export default function Session({ repo }: Props) {
     }
   };
 
+  // 屬於本 repo、但還沒對應到 jsonl 的背景 tmux(新開、尚未互動的 claude)。
+  const safeRepo = repo.replace(/[^A-Za-z0-9_]/g, '_');
+  const sessionTnames = new Set(
+    sessions.map(
+      (s) => `porthole_${safeRepo}_${s.id.replace(/[^A-Za-z0-9_]/g, '').slice(0, 8)}`,
+    ),
+  );
+  const extraTmux = tmuxNames.filter(
+    (n) => n.startsWith(`porthole_${safeRepo}_`) && !sessionTnames.has(n),
+  );
+
   return (
     <div style={{ display: 'flex', height: '100%' }} data-loc="session:root">
       <div
@@ -97,6 +108,33 @@ export default function Session({ repo }: Props) {
           {tmuxNames.length > 0 && <Tag color="green">{tmuxNames.length} 個背景 tmux</Tag>}
         </Space>
         {err && <Alert type="error" message={err} style={{ marginBottom: 8 }} />}
+        {extraTmux.length > 0 && (
+          <List
+            size="small"
+            header={<Typography.Text type="secondary">$ 系統開的 tmux(裸 shell)</Typography.Text>}
+            dataSource={extraTmux}
+            style={{ marginBottom: 8 }}
+            renderItem={(name) => (
+              <List.Item style={{ display: 'block' }} data-loc="session:live">
+                <Typography.Text ellipsis style={{ maxWidth: 300 }} title={name}>
+                  ${name.replace(`porthole_${safeRepo}_`, '')}
+                </Typography.Text>
+                <div style={{ marginTop: 6 }}>
+                  <Space>
+                    <Button size="small" type="primary" onClick={() => setAttached(name)}>
+                      attach
+                    </Button>
+                    <Popconfirm title="收掉這個 tmux session?" onConfirm={() => void kill(name)}>
+                      <Button size="small" danger>
+                        收掉
+                      </Button>
+                    </Popconfirm>
+                  </Space>
+                </div>
+              </List.Item>
+            )}
+          />
+        )}
         <List
           size="small"
           dataSource={sessions}
