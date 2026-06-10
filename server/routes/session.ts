@@ -12,8 +12,6 @@ import { guard } from '../lib/path-guard.ts';
 import {
   listClaudeSessions,
   ensureTmux,
-  startFreshTmux,
-  newTmuxName,
   listTmux,
   killTmux,
   tmuxName,
@@ -43,14 +41,6 @@ export default async function sessionRoutes(app: FastifyInstance) {
       return { name };
     },
   );
-
-  // 開全新 claude session(裸 `claude`,無 --resume)。互動後 claude 自會落 jsonl,refresh 即現。
-  app.post<{ Params: { repo: string } }>('/api/:repo/sessions/new', async (req) => {
-    const root = guard.repoRoot(req.params.repo);
-    const name = newTmuxName(req.params.repo);
-    await startFreshTmux(name, root);
-    return { name };
-  });
 
   app.get('/api/tmux', async () => {
     return { sessions: await listTmux() };

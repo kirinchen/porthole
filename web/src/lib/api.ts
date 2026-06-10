@@ -75,12 +75,6 @@ export const api = {
     return (await r.json()) as { name: string };
   },
 
-  newSession: async (repo: string) => {
-    const r = await fetch(`/api/${repo}/sessions/new`, { method: 'POST' });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return (await r.json()) as { name: string };
-  },
-
   tmuxList: () => jget<{ sessions: string[] }>('/api/tmux'),
 
   tmuxKill: async (name: string) => {
