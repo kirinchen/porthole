@@ -138,6 +138,78 @@ const mermaidField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
+/** 空白行右鍵插入的範例 flowchart(刻意用矩形節點子集,GUI tab 可直接解析)。 */
+const SAMPLE_FLOW = [
+  '```mermaid',
+  'graph TD;',
+  '    A[開始] --> B[處理];',
+  '    A --> C[檢查];',
+  '    B --> D[完成];',
+  '    C --> D;',
+  '```',
+].join('\n');
+
+// 空白行右鍵選單(純 DOM,輕量;不引 Antd 進 CM6 widget 樹)。
+let flowMenu: HTMLDivElement | null = null;
+function closeFlowMenu() {
+  if (flowMenu) {
+    flowMenu.remove();
+    flowMenu = null;
+  }
+  document.removeEventListener('mousedown', onDocMouseDown);
+  document.removeEventListener('keydown', onDocKeyDown);
+}
+function onDocMouseDown(e: MouseEvent) {
+  if (flowMenu && !flowMenu.contains(e.target as Node)) closeFlowMenu();
+}
+function onDocKeyDown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeFlowMenu();
+}
+function showFlowMenu(x: number, y: number, onPick: () => void) {
+  closeFlowMenu();
+  const menu = document.createElement('div');
+  menu.setAttribute('data-loc', 'explore:edit:flowmenu');
+  menu.style.cssText =
+    'position:fixed;z-index:1500;background:#fff;border:1px solid #d9d9d9;border-radius:6px;' +
+    'box-shadow:0 2px 8px rgba(0,0,0,.15);padding:4px;font-size:13px;' +
+    `left:${x}px;top:${y}px;`;
+  const item = document.createElement('div');
+  item.textContent = '＋ new flow chart';
+  item.style.cssText = 'padding:6px 12px;cursor:pointer;border-radius:4px;white-space:nowrap;';
+  item.onmouseenter = () => (item.style.background = '#f0f0f0');
+  item.onmouseleave = () => (item.style.background = '');
+  // 用 mousedown(早於 outside-close 的 click),preventDefault 不讓編輯器失焦。
+  item.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    onPick();
+    closeFlowMenu();
+  });
+  menu.appendChild(item);
+  document.body.appendChild(menu);
+  flowMenu = menu;
+  document.addEventListener('mousedown', onDocMouseDown);
+  document.addEventListener('keydown', onDocKeyDown);
+}
+
+/** 空白行右鍵 → 選單;點 new flow chart → 用範例取代該空白行。 */
+const flowContextMenu = EditorView.domEventHandlers({
+  contextmenu(event, view) {
+    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+    if (pos == null) return false;
+    const line = view.state.doc.lineAt(pos);
+    if (line.text.trim() !== '') return false; // 非空白行 → 用瀏覽器原生選單
+    event.preventDefault();
+    showFlowMenu(event.clientX, event.clientY, () => {
+      view.dispatch({
+        changes: { from: line.from, to: line.to, insert: SAMPLE_FLOW },
+        selection: { anchor: line.from + SAMPLE_FLOW.length },
+      });
+      view.focus();
+    });
+    return true;
+  },
+});
+
 /** 依游標位置決定哪些行要露出原始碼,其餘套 live-preview 裝飾。 */
 function buildDecorations(view: EditorView): DecorationSet {
   const { doc } = view.state;
@@ -269,6 +341,7 @@ export default function MarkdownEditor({ value, onChange }: Props) {
           markdown(),
           EditorView.lineWrapping,
           mermaidField,
+          flowContextMenu,
           livePreview,
           theme,
           EditorView.updateListener.of((u) => {
@@ -279,7 +352,10 @@ export default function MarkdownEditor({ value, onChange }: Props) {
       parent: host.current,
     });
     view.focus();
-    return () => view.destroy();
+    return () => {
+      closeFlowMenu();
+      view.destroy();
+    };
     // value 只用於初始化;父層以 key=path 強制每檔重掛,故不放進依賴。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
