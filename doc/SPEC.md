@@ -98,6 +98,7 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 
 ### 4.3 Session
 - 列出 `claude -r` 可恢復的 session。
+- **新 session**:`+ 新 session` → 在 repo cwd 開一個跑裸 `claude`(無 `--resume`)的背景 tmux 並 attach;互動後 claude 自落 `.jsonl`,重新整理即列入可恢復清單。
 - 點某個 session → 對應一個 **tmux session**,讓該 claude session 可在背景持續工作(detach 後仍跑)。
 - UI 可 attach 進該 tmux(xterm.js)看即時輸出、可 detach。
 - tmux session 命名與生命週期管理(建立 / attach / detach / 列出 / 收掉)在實作前由 BDA 出細部設計,Kelp 驗收。**此 Tab 最複雜、風險最高**。
@@ -158,9 +159,10 @@ porthole/
 - **session 列舉(deterministic-first,不走互動式 `claude -r`)**:claude 把每個 session 存成
   `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl`,`encoded-cwd` = repoRoot 把 `/`、`\` 換成 `-`。
   一個 `.jsonl` = 一個可恢復 session。porthole 讀該目錄列出 id / mtime / 首則 user 訊息當標題。
-- **tmux 命名**:`porthole_<repo>_<id8>`,只留 `[A-Za-z0-9_]`(tmux 安全)。前綴 `porthole_` 供列舉/收斂。
+- **tmux 命名**:resume 用 `porthole_<repo>_<id8>`;新 session 無 id → `porthole_<repo>_new<base36 時間戳>`。皆只留 `[A-Za-z0-9_]`(tmux 安全),前綴 `porthole_` 供列舉/收斂。
 - **生命週期**:
-  - 建立:`tmux new-session -d -s <name> -c <repoRoot> 'claude --resume <id>'`(背景 detached)。
+  - 建立(resume):`tmux new-session -d -s <name> -c <repoRoot> 'claude --resume <id>'`(背景 detached)。
+  - 建立(新):`tmux new-session -d -s <name> -c <repoRoot> 'claude'`(`POST /api/:repo/sessions/new`);互動後 claude 自落 `.jsonl` → 列入可恢復清單。
   - attach:後端用 `node-pty` spawn `tmux attach -t <name>`,接到 WS `/ws/tmux/:name`,前端 xterm.js。
   - detach:前端關閉 WS(切走/關 tab)→ tmux client 退出,**session 仍在背景續跑**(本 tab 的目的)。
   - 收掉:`DELETE /api/tmux/:name`(名稱須符 `porthole_*`)→ `tmux kill-session`。

@@ -100,6 +100,12 @@ export function tmuxName(repo: string, sessionId: string): string {
   return `porthole_${safeRepo}_${safeId}`;
 }
 
+/** 新 session 的 tmux 命名(無既有 id → 用時間戳,base36 只含 [0-9a-z])。 */
+export function newTmuxName(repo: string): string {
+  const safeRepo = repo.replace(/[^A-Za-z0-9_]/g, '_');
+  return `porthole_${safeRepo}_new${Date.now().toString(36)}`;
+}
+
 /** tmux 中是否已有此 session。 */
 export async function tmuxExists(name: string): Promise<boolean> {
   try {
@@ -125,6 +131,12 @@ export async function ensureTmux(name: string, cwd: string, claudeSessionId: str
     '--resume',
     claudeSessionId,
   ]);
+}
+
+/** 開一個全新背景 tmux session,在 repo cwd 內跑裸 `claude`(不帶 --resume)。 */
+export async function startFreshTmux(name: string, cwd: string): Promise<void> {
+  if (await tmuxExists(name)) return;
+  await pexec('tmux', ['new-session', '-d', '-s', name, '-c', cwd, 'claude']);
 }
 
 /** 列出 porthole 開的 tmux session 名稱。 */

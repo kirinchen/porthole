@@ -50,6 +50,20 @@ export default function Session({ repo }: Props) {
     }
   };
 
+  const startNew = async () => {
+    setStarting('__new__');
+    setErr(null);
+    try {
+      const { name } = await api.newSession(repo);
+      setAttached(name);
+      refresh();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setStarting(null);
+    }
+  };
+
   const kill = async (name: string) => {
     try {
       await api.tmuxKill(name);
@@ -66,6 +80,16 @@ export default function Session({ repo }: Props) {
         style={{ width: 340, borderRight: '1px solid #f0f0f0', padding: 8, overflow: 'auto' }}
         data-loc="session:list"
       >
+        <Button
+          block
+          type="primary"
+          loading={starting === '__new__'}
+          onClick={() => void startNew()}
+          style={{ marginBottom: 8 }}
+          data-loc="session:new"
+        >
+          + 新 session
+        </Button>
         <Space style={{ marginBottom: 8 }}>
           <Button size="small" onClick={refresh}>
             重新整理

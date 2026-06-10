@@ -1,7 +1,7 @@
 /**
  * Markdown — 共用的 markdown 渲染器(Explore 預覽 + Chat 訊息)。
  *  - remark-gfm。
- *  - ```mermaid 區塊 → MermaidBlock(渲染 SVG);給 onMermaidEdit 時 flowchart 顯示 GUI 編輯鈕。
+ *  - ```mermaid 區塊 → MermaidBlock(預覽 / 編輯 / GUI tab);給 onMermaidChange 時可寫回。
  *  - 其餘 code 區塊照常 <pre><code>;行內 code 維持 <code>。
  *  呼叫端自行包 .md-preview(沿用既有樣式)。
  */
@@ -11,10 +11,11 @@ import MermaidBlock from './MermaidBlock';
 
 interface Props {
   children: string;
-  onMermaidEdit?: (code: string) => void;
+  /** 有給 → mermaid 區塊可編輯/GUI,套用後以 (舊碼, 新碼) 回寫。 */
+  onMermaidChange?: (oldCode: string, newCode: string) => void;
 }
 
-export default function Markdown({ children, onMermaidEdit }: Props) {
+export default function Markdown({ children, onMermaidChange }: Props) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -25,7 +26,12 @@ export default function Markdown({ children, onMermaidEdit }: Props) {
           const cls = className ?? '';
           const text = String(c ?? '').replace(/\n$/, '');
           if (/\blanguage-mermaid\b/.test(cls)) {
-            return <MermaidBlock code={text} onGuiEdit={onMermaidEdit} />;
+            return (
+              <MermaidBlock
+                code={text}
+                onApply={onMermaidChange ? (nc) => onMermaidChange(text, nc) : undefined}
+              />
+            );
           }
           const isBlock = /\blanguage-/.test(cls) || text.includes('\n');
           if (isBlock) {
