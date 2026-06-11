@@ -8,8 +8,11 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 
-export const DEFAULT_BASE = '/home/kirin/Desktop/project';
+// 後備預設;正式以 env PORTHOLE_BASE 覆寫(見 .env.example)。用 homedir 組,
+// 不寫死使用者名稱。
+export const DEFAULT_BASE = path.join(os.homedir(), 'Desktop', 'project');
 
 export class PathGuardError extends Error {
   readonly statusCode = 403;

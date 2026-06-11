@@ -7,7 +7,7 @@
 - Node(走 nvm),已驗於 Node 24。
 - `claude` CLI 在 PATH(Chat / Session 用)。
 - `tmux` 在 PATH(Session tab 用)。
-- basePath 預設 `<your-project-base>`(原始碼內 `DEFAULT_BASE`),可用環境變數 `PORTHOLE_BASE` 覆寫。
+- 設定走 repo root 的 `.env`(見下方「設定」)。
 
 ## 安裝(第一次)
 
@@ -16,6 +16,22 @@
 npm install            # 裝根層工具(concurrently)
 npm run install:all    # 裝 server + web 依賴
 ```
+
+## 設定(`.env`)
+
+設定集中在 repo root 的 `.env`(已 gitignore),啟動時由 `server/env.ts` 載入(自行解析,不依賴 Node 版本)。第一次:
+
+```bash
+cp .env.example .env    # 再依註解填值
+```
+
+| 變數 | 說明 |
+|------|------|
+| `HOST` | 後端綁定位址。`127.0.0.1`=僅本機;填 tailscale IP=只 tailnet 可達;`0.0.0.0`=連 LAN 一起開(⚠️ 無認證+CLI=RCE,僅信任網路)。 |
+| `PORT` | 監聽 port(預設 4321)。 |
+| `PORTHOLE_BASE` | repo 掃描根目錄;URL 第一段 repo 名 → `<PORTHOLE_BASE>/<repo>`,受 path-guard 鎖住。 |
+
+> 外部環境變數優先於 `.env`(`.env` 不覆寫既有 env)。systemd 部署時別在 unit 裡再設這些,否則會壓過 `.env`。
 
 ## Dev(開發,前後端分離 + 熱更新)
 
@@ -62,9 +78,9 @@ journalctl --user -u porthole -f      # 看 log
 
 > ⚠️ **改 code / rebuild 後務必 restart**:`npm run prod` 重建 `web/dist` 後,**一定要** `systemctl --user restart porthole`,否則 service 跑的仍是舊 dist。
 
-- service 綁 `HOST=0.0.0.0` → 本機 + tailscale(**http://<your-tailscale-ip>:4321**)皆可達。
-- 本機家用無公網直連,`0.0.0.0` 實際只開 tailscale + LAN(見 SPEC §2)。
-- **⚠️ 安全前提**:porthole **無認證**,CLI/Session tab = 完整 shell(RCE)。`0.0.0.0` 等於把 shell 開給整個 tailscale + LAN 網段。只在**信任網路**這樣綁;不信任的網段請改綁 tailscale 網卡 IP 或加認證。WS 已有同源檢查擋 CSWSH(SPEC §2),但那只擋跨站網頁,不擋能直連的人。
+- 綁定由 `.env` 的 `HOST` 決定(unit 不再寫死)。目前綁 **tailscale 網卡 IP** → **只 tailnet 可達**(不開 LAN、也不綁 loopback)。
+- **故本機開瀏覽器也要用 tailscale 網址**(`http://<your-tailscale-ip>:4321`),`127.0.0.1` 不再可達 —— 這是用 tailnet 成員身分當「網路層認證」、收掉 LAN 破口的代價。
+- **⚠️ 安全前提**:porthole **無認證**,CLI/Session tab = 完整 shell(RCE)。綁 tailscale IP = 把 shell 開給你 tailnet 內所有裝置;**別**改回 `0.0.0.0`(那會連 LAN 一起開)。WS 另有同源檢查擋 CSWSH(SPEC §2),但只擋跨站網頁,不擋能直連的人。
 
 ## 其他指令
 

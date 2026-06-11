@@ -3,6 +3,7 @@
  * 設 HOST 環境變數可改綁特定介面(如 tailscale IP),見 SPEC §2。
  * serve 前端 build + REST/SSE + WebSocket;PathGuardError → 403。
  */
+import './env.ts'; // 必須最先:載入 .env,須早於 path-guard 等讀 env 的模組
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';

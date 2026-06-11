@@ -5,9 +5,9 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=<your-project-base>/porthole
-# 綁 0.0.0.0 → 本機 + tailscale 皆可達(家用無公網直連)
-Environment=HOST=0.0.0.0
-Environment=PORT=4321
+# 設定(HOST/PORT/PORTHOLE_BASE)由 repo root 的 .env 提供(server/env.ts 載入)。
+# 刻意不在此設 Environment=,否則會壓過 .env(loadEnvFile 不覆寫既有 env)。
+# 綁定:.env 設 HOST=<tailscale-ip> → 只 tailnet 可達(非 0.0.0.0,不開 LAN)。
 # bash -lc 載入 nvm,讓 node/npm 在 PATH
 ExecStart=/bin/bash -lc 'npm run start'
 Restart=on-failure
