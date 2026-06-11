@@ -1,6 +1,6 @@
 # porthole 部署記錄
 
-## systemd 常駐(本機 kirin-desktop,2026-06-06 起用)
+## systemd 常駐(2026-06-06 起用)
 
 porthole 以 **systemd user service** 常駐:開機自啟、crash 自重啟、綁 tailscale。
 
@@ -20,8 +20,9 @@ systemctl --user stop    porthole
 journalctl --user -u porthole -f      # 看 log
 ```
 
-- 綁 `HOST=0.0.0.0` → 本機 + tailscale(**http://100.114.93.81:4321**)皆可達。
+- 綁 `HOST=0.0.0.0` → 本機 + tailscale(**http://<your-tailscale-ip>:4321**)皆可達。
 - 本機家用無公網直連,`0.0.0.0` 實際只開 tailscale + LAN。
+- **⚠️ 無認證 + CLI=完整 shell(RCE)**:`0.0.0.0` 把 shell 開給整個 tailscale + LAN。僅限信任網路;否則改綁 tailscale IP 或加認證(見 SPEC §2 邊界適用範圍)。
 
 ---
 

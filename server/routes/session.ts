@@ -18,6 +18,7 @@ import {
   tmuxExists,
 } from '../lib/tmux.ts';
 import { bridgePty } from '../lib/pty-bridge.ts';
+import { isSameOriginWs } from '../lib/ws-origin.ts';
 
 function assertPortholeName(name: string): void {
   if (!/^porthole_[A-Za-z0-9_]+$/.test(name)) {
@@ -60,6 +61,11 @@ export default async function sessionRoutes(app: FastifyInstance) {
     '/ws/tmux/:name',
     { websocket: true },
     async (socket: WebSocket, req) => {
+      if (!isSameOriginWs(req)) {
+        socket.send('\r\n[error] cross-origin websocket rejected\r\n');
+        socket.close();
+        return;
+      }
       const name = req.params.name;
       try {
         assertPortholeName(name);

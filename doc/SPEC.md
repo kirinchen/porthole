@@ -36,18 +36,20 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 ## 2. Port / basePath / 安全(核心,不可妥協)
 
 - 單一 port **4321**。
-- **basePath = `/home/kirin/Desktop/project`**(可由 env `PORTHOLE_BASE` 覆寫)。
+- **basePath = `<your-project-base>`**(原始碼內 `DEFAULT_BASE`,可由 env `PORTHOLE_BASE` 覆寫)。
 - URL 第一段 = repo 名:`http://localhost:4321/coral` → `<base>/coral` 頂該 repo root;`/inray` → `<base>/inray`,依此類推。
 - **path guard(REA 實體邊界)**:
   - 所有 fs 讀寫、claude/tmux 的 CWD,**一律先正規化(`realpath`)再驗證仍落在 `<base>` 之內**;任何 `..` 逃逸出 base → 直接拒絕(HTTP 403)。
-  - 概念抄 InRay `inray-paths` path guard。這是把「web 變全機讀檔漏洞」擋掉的唯一防線,**不靠 prompt,靠 code**。
+  - 概念抄 InRay `inray-paths` path guard。這是把「web 變全機讀檔漏洞」擋掉的唯一防線(**僅就 fs 讀寫而言**,見下方適用範圍),**不靠 prompt,靠 code**。
   - 寫入面收斂(逐一明列才開放):
     - Chat:只能寫 `<repo>/doc/chat/`。
-    - Explore 編輯:可寫 active repo 內**任一路徑**(覆寫既存或新增),仍受 path-guard 鎖在 repo root 內、逃不出 base。`PUT /api/:repo/file`。
+    - Explore 編輯:可寫 active repo 內**任一路徑**(覆寫既存或新增),仍受 path-guard 鎖在 repo root 內、逃不出 base。`PUT /api/:repo/file`。(注意:repo 內含 `.git/`、`.claude/` 等 dotfile 也在可寫範圍 → 寫 git hook 可間接執行;這在「單機自用 + 信任網路」前提下接受。)
+- **⚠️ 邊界的適用範圍(誠實聲明,別誤判)**:path guard 只約束 **fs 讀寫與子程序的 CWD**。**CLI / Session tab 是完整 PTY**(shell / `tmux attach`)——使用者可在其中 `cd` 到任何地方、執行任意指令,等同**以服務執行身分的完整 RCE**;path guard 對此**不是限制**(只決定起始目錄)。porthole **無認證**(§8,單機自用),所以 CLI/Session 的安全**完全靠「只在信任網路內、無未授權者可達」這個營運假設**撐著。對外開放 = 把一個 shell 開給該網段所有人。
+- **CSWSH 防線(WS 同源檢查)**:WebSocket 不受同源政策約束、無 CORS preflight,任何跨站網頁可在使用者瀏覽器內連本機 WS(`/ws/cli`、`/ws/tmux`)拿 shell —— **綁 `127.0.0.1` 也擋不住**,因為攻擊載體是使用者自己的瀏覽器。對策:WS upgrade 要求 `Origin` 與請求 `Host` 同源,跨站一律拒(`server/lib/ws-origin.ts`)。瀏覽器無法偽造 WebSocket Origin,故此檢查對 CSWSH 是實體邊界;非瀏覽器(無 Origin)放行。
 - **預設綁 `127.0.0.1`(loopback)**。設 `HOST` 環境變數可改綁定位址。
-  - **正式部署(本機 kirin-desktop)實際綁 `HOST=0.0.0.0`**,開放 tailscale 連入(網址 **http://100.114.93.81:4321**)。本機家用無公網直連,`0.0.0.0` 實際只開 tailscale + LAN,非全網暴露。部署方式見 `RUN.md`「systemd 常駐」+ `deploy/`。
+  - **正式部署實際綁 `HOST=0.0.0.0`**,開放 tailscale 連入(網址 **http://<your-tailscale-ip>:4321**)。本機家用無公網直連,`0.0.0.0` 實際只開 tailscale + LAN,非全網暴露。部署方式見 `RUN.md`「systemd 常駐」+ `deploy/`。
   - 預設值仍維持 `127.0.0.1`;開放對外屬部署時的顯式決定,由 env 覆寫,不改預設。
-  - 注意:tailscale/區網走 **http**(非 https),非 secure context → 瀏覽器 `navigator.clipboard` 失效,複製功能受影響(見 §6)。path guard 仍是唯一實體邊界,不因綁定位址放寬。
+  - 注意:tailscale/區網走 **http**(非 https),非 secure context → 瀏覽器 `navigator.clipboard` 失效,複製功能受影響(見 §6)。path guard 仍是 fs 面的實體邊界,不因綁定位址放寬(但它不約束 CLI/Session 的 PTY,見上方適用範圍)。
 
 ---
 
@@ -109,6 +111,7 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 ### 4.4 CLI
 - 基本 console:PTY shell,CWD = active repo root。
 - `node-pty` + `xterm.js`,WebSocket 雙向。
+- **⚠️ 這是完整 shell**:CWD 是 repo root,但使用者可 `cd` 出去執行任意指令(完整 RCE,非 path-guard 所能限制)。安全前提見 §2「邊界的適用範圍」與「CSWSH 防線」。
 
 ---
 

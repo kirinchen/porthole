@@ -4,7 +4,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/kirin/Desktop/project/porthole
+WorkingDirectory=<your-project-base>/porthole
 # 綁 0.0.0.0 → 本機 + tailscale 皆可達(家用無公網直連)
 Environment=HOST=0.0.0.0
 Environment=PORT=4321

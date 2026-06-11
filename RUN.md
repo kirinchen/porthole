@@ -7,7 +7,7 @@
 - Node(走 nvm),已驗於 Node 24。
 - `claude` CLI 在 PATH(Chat / Session 用)。
 - `tmux` 在 PATH(Session tab 用)。
-- basePath 預設 `/home/kirin/Desktop/project`,可用環境變數 `PORTHOLE_BASE` 覆寫。
+- basePath 預設 `<your-project-base>`(原始碼內 `DEFAULT_BASE`),可用環境變數 `PORTHOLE_BASE` 覆寫。
 
 ## 安裝(第一次)
 
@@ -62,8 +62,9 @@ journalctl --user -u porthole -f      # 看 log
 
 > ⚠️ **改 code / rebuild 後務必 restart**:`npm run prod` 重建 `web/dist` 後,**一定要** `systemctl --user restart porthole`,否則 service 跑的仍是舊 dist。
 
-- service 綁 `HOST=0.0.0.0` → 本機 + tailscale(**http://100.114.93.81:4321**)皆可達。
+- service 綁 `HOST=0.0.0.0` → 本機 + tailscale(**http://<your-tailscale-ip>:4321**)皆可達。
 - 本機家用無公網直連,`0.0.0.0` 實際只開 tailscale + LAN(見 SPEC §2)。
+- **⚠️ 安全前提**:porthole **無認證**,CLI/Session tab = 完整 shell(RCE)。`0.0.0.0` 等於把 shell 開給整個 tailscale + LAN 網段。只在**信任網路**這樣綁;不信任的網段請改綁 tailscale 網卡 IP 或加認證。WS 已有同源檢查擋 CSWSH(SPEC §2),但那只擋跨站網頁,不擋能直連的人。
 
 ## 其他指令
 

@@ -6,12 +6,18 @@ import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { guard, PathGuardError } from '../lib/path-guard.ts';
 import { bridgePty } from '../lib/pty-bridge.ts';
+import { isSameOriginWs } from '../lib/ws-origin.ts';
 
 export default async function cliRoutes(app: FastifyInstance) {
   app.get<{ Params: { repo: string } }>(
     '/ws/cli/:repo',
     { websocket: true },
     (socket: WebSocket, req) => {
+      if (!isSameOriginWs(req)) {
+        socket.send('\r\n[error] cross-origin websocket rejected\r\n');
+        socket.close();
+        return;
+      }
       let cwd: string;
       try {
         cwd = guard.repoRoot(req.params.repo);
