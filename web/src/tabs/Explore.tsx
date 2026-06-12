@@ -19,7 +19,20 @@ import {
   Suspense,
   type ReactNode,
 } from 'react';
-import { Tree, Empty, Spin, Alert, Grid, Drawer, Button, Typography, Input, Modal, Space } from 'antd';
+import {
+  Tree,
+  Empty,
+  Spin,
+  Alert,
+  Grid,
+  Drawer,
+  Button,
+  Typography,
+  Input,
+  Modal,
+  Space,
+  Popconfirm,
+} from 'antd';
 import type { TreeDataNode } from 'antd';
 import {
   MenuOutlined,
@@ -32,6 +45,7 @@ import {
   LeftOutlined,
   RightOutlined,
   ReloadOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import { api } from '../lib/api';
 import Markdown from '../components/Markdown';
@@ -66,6 +80,8 @@ const parentDir = (p: string) => {
 };
 /** 接 dir + name(dir 為空 = repo root)。 */
 const joinPath = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
+/** 路徑最後一段。 */
+const basename = (p: string) => p.slice(p.lastIndexOf('/') + 1);
 
 /** File → base64(去掉 data: 前綴),供上傳走 PUT encoding=base64。 */
 function fileToBase64(file: File): Promise<string> {
@@ -115,6 +131,13 @@ interface ExploreCtx {
   setNewDirOpen: (b: boolean) => void;
   newDirName: string;
   setNewDirName: (s: string) => void;
+  renameOpen: boolean;
+  setRenameOpen: (b: boolean) => void;
+  renameName: string;
+  setRenameName: (s: string) => void;
+  beginRename: (path: string) => void;
+  commitRename: () => void;
+  removePath: (path: string) => void;
   treeMin: boolean;
   setTreeMin: (b: boolean) => void;
   onLoadData: (node: TreeDataNode) => Promise<void>;
@@ -152,6 +175,9 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   const [newPath, setNewPath] = useState('');
   const [newDirOpen, setNewDirOpen] = useState(false);
   const [newDirName, setNewDirName] = useState('');
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameName, setRenameName] = useState('');
+  const [renameTarget, setRenameTarget] = useState('');
   const [baseDir, setBaseDir] = useState(''); // 選資料夾 → 該夾;選檔 → 其父夾;預設 root
   const [treeMin, setTreeMin] = useState(false);
   const screens = Grid.useBreakpoint();
@@ -284,6 +310,49 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     }
   };
 
+  // 改名 / 刪除(同層改名;刪除目錄連內容)。受影響的開啟檔同步更新。
+  const beginRename = (p: string) => {
+    setRenameTarget(p);
+    setRenameName(basename(p));
+    setRenameOpen(true);
+  };
+  const commitRename = async () => {
+    const name = renameName.trim().replace(/^[/\\]+/, '');
+    const from = renameTarget;
+    if (!name || !from) return;
+    const to = joinPath(parentDir(from), name);
+    setRenameOpen(false);
+    if (to === from) return;
+    setErr(null);
+    setNote(null);
+    try {
+      await api.renamePath(repo, from, to);
+      if (sel && sel.path === from) {
+        setSel({ ...sel, path: to });
+        setSelPath(to);
+      } else if (selPath === from) {
+        setSelPath(to);
+      }
+      reloadTree();
+      setNote(`已改名 → ${to}`);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+  const removePath = async (p: string) => {
+    setErr(null);
+    setNote(null);
+    try {
+      await api.deletePath(repo, p);
+      if (sel && (sel.path === p || sel.path.startsWith(`${p}/`))) setSel(null);
+      if (selPath && (selPath === p || selPath.startsWith(`${p}/`))) setSelPath(null);
+      reloadTree();
+      setNote(`已刪除 ${p}`);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+
   // 上傳:多檔 → 各讀成 base64 PUT 到 baseDir 下(同新增檔邏輯,走 path-guard)。
   const uploadFiles = async (files: FileList) => {
     setErr(null);
@@ -328,6 +397,13 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setNewDirOpen,
     newDirName,
     setNewDirName,
+    renameOpen,
+    setRenameOpen,
+    renameName,
+    setRenameName,
+    beginRename,
+    commitRename: () => void commitRename(),
+    removePath: (p: string) => void removePath(p),
     treeMin,
     setTreeMin,
     onLoadData,
@@ -413,6 +489,36 @@ function TreePanel() {
           loadData={c.onLoadData}
           onSelect={c.onSelect}
           blockNode
+          titleRender={(node) => {
+            const n = node as Node;
+            return (
+              <span className="ph-row">
+                <span className="ph-row-name">{n.title as React.ReactNode}</span>
+                <span className="ph-row-actions" onClick={(e) => e.stopPropagation()}>
+                  <EditOutlined
+                    title="改名"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      c.beginRename(n.path);
+                    }}
+                  />
+                  <Popconfirm
+                    title={`刪除 ${n.title}?${n.isLeaf ? '' : '(資料夾連內容)'}`}
+                    okText="刪除"
+                    cancelText="取消"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => c.removePath(n.path)}
+                  >
+                    <DeleteOutlined
+                      title="刪除"
+                      style={{ color: '#cf1322' }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </Popconfirm>
+                </span>
+              </span>
+            );
+          }}
         />
       )}
     </>
@@ -618,6 +724,24 @@ export function ExplorePreview() {
           onPressEnter={c.createDir}
           placeholder="例如 note"
           data-loc="explore:dir:new:name"
+        />
+      </Modal>
+
+      <Modal
+        title="改名"
+        open={c.renameOpen}
+        onOk={c.commitRename}
+        onCancel={() => c.setRenameOpen(false)}
+        okText="改名"
+        cancelText="取消"
+        okButtonProps={{ disabled: !c.renameName.trim() }}
+      >
+        <Input
+          value={c.renameName}
+          onChange={(e) => c.setRenameName(e.target.value)}
+          onPressEnter={c.commitRename}
+          placeholder="新名稱(同層)"
+          data-loc="explore:rename:input"
         />
       </Modal>
     </div>

@@ -69,6 +69,26 @@ export const api = {
     }
   },
 
+  deletePath: async (repo: string, path: string) => {
+    const r = await fetch(`/api/${repo}/fs?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+    if (!r.ok) {
+      const b = (await r.json().catch(() => ({}))) as { error?: string };
+      throw new Error(b.error ?? `HTTP ${r.status}`);
+    }
+  },
+
+  renamePath: async (repo: string, from: string, to: string) => {
+    const r = await fetch(`/api/${repo}/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, to }),
+    });
+    if (!r.ok) {
+      const b = (await r.json().catch(() => ({}))) as { error?: string };
+      throw new Error(b.error ?? `HTTP ${r.status}`);
+    }
+  },
+
   threads: (repo: string) => jget<{ threads: ThreadMeta[] }>(`/api/${repo}/chat/threads`),
 
   thread: (repo: string, name: string) =>

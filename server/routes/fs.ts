@@ -111,4 +111,43 @@ export default async function fsRoutes(app: FastifyInstance) {
       return { ok: true };
     },
   );
+
+  // 刪除檔 / 目錄(目錄連內容)。path-guard;不可刪 repo root。
+  app.delete<{ Params: { repo: string }; Querystring: { path?: string } }>(
+    '/api/:repo/fs',
+    async (req, reply) => {
+      const rel = req.query.path ?? '';
+      if (!rel) return reply.code(400).send({ error: 'path required' });
+      const target = guard.resolveInRepo(req.params.repo, rel);
+      if (target === guard.repoRoot(req.params.repo)) {
+        return reply.code(400).send({ error: 'cannot delete repo root' });
+      }
+      await fs.rm(target, { recursive: true, force: false });
+      return { ok: true };
+    },
+  );
+
+  // 改名 / 移動(repo 內)。path-guard 鎖兩端;拒覆蓋既存、拒動 repo root。
+  app.post<{ Params: { repo: string }; Body: { from?: string; to?: string } }>(
+    '/api/:repo/rename',
+    async (req, reply) => {
+      const from = req.body?.from ?? '';
+      const to = req.body?.to ?? '';
+      if (!from || !to) return reply.code(400).send({ error: 'from and to required' });
+      const src = guard.resolveInRepo(req.params.repo, from);
+      const dst = guard.resolveInRepo(req.params.repo, to);
+      if (src === guard.repoRoot(req.params.repo)) {
+        return reply.code(400).send({ error: 'cannot rename repo root' });
+      }
+      try {
+        await fs.access(dst);
+        return reply.code(409).send({ error: 'target exists' });
+      } catch {
+        /* 不存在 → 可改 */
+      }
+      await fs.mkdir(path.dirname(dst), { recursive: true });
+      await fs.rename(src, dst);
+      return { ok: true };
+    },
+  );
 }

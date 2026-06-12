@@ -42,3 +42,29 @@ body {
 .md-preview img {
   max-width: 100%;
 }
+
+/* Explore 樹節點:hover / 選取時於名稱旁顯示改名 + 刪除 */
+.ph-row {
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  gap: 4px;
+}
+.ph-row-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ph-row-actions {
+  display: none;
+  gap: 10px;
+  padding-right: 4px;
+}
+.ph-row-actions .anticon {
+  cursor: pointer;
+}
+.ant-tree-treenode:hover .ph-row-actions,
+.ant-tree-treenode-selected .ph-row-actions {
+  display: inline-flex;
+}
