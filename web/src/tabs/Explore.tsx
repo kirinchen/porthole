@@ -252,24 +252,20 @@ function TreePanel() {
   const c = useExplore();
   return (
     <>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
         <Button
           icon={<FileAddOutlined />}
           onClick={() => c.setNewOpen(true)}
-          style={{ flex: 1 }}
+          title="新檔"
           data-loc="explore:file:new"
-        >
-          新檔
-        </Button>
+        />
         {!c.isMobile && (
           <Button
             icon={<LeftOutlined />}
             onClick={() => c.setTreeMin(true)}
             title="最小化檔案樹"
             data-loc="explore:tree:minimize"
-          >
-            最小化
-          </Button>
+          />
         )}
       </div>
       {c.err && <Alert type="error" message={c.err} style={{ marginBottom: 8 }} />}

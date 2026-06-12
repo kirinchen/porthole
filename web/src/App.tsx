@@ -17,6 +17,9 @@ import {
   DesktopOutlined,
   CodeOutlined,
   DownOutlined,
+  FullscreenOutlined,
+  FullscreenExitOutlined,
+  MinusOutlined,
 } from '@ant-design/icons';
 import Explore, { ExploreProvider, ExploreTree, ExplorePreview } from './tabs/Explore';
 import Chat from './tabs/Chat';
@@ -72,6 +75,14 @@ export default function App() {
   const [minHover, setMinHover] = useState(false);
   const workRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
+  const minHoverTimer = useRef<number | undefined>(undefined);
+  const openMin = () => {
+    if (minHoverTimer.current) clearTimeout(minHoverTimer.current);
+    setMinHover(true);
+  };
+  const closeMin = () => {
+    minHoverTimer.current = window.setTimeout(() => setMinHover(false), 200);
+  };
 
   // 保活:右側已造訪過的 tab 一旦掛載就保留(切走只隱藏,不卸載 → 終端不斷)。
   const [visited, setVisited] = useState<Set<RightKey>>(() => new Set<RightKey>([rightSel]));
@@ -185,6 +196,7 @@ export default function App() {
     <Space size={4}>
       <Dropdown
         trigger={['click']}
+        getPopupContainer={(t) => t.parentElement ?? document.body}
         menu={{
           items: RIGHT_TABS.map((t) => ({ key: t.key, label: t.label })),
           selectedKeys: [rightSel],
@@ -200,28 +212,28 @@ export default function App() {
       </Dropdown>
       <Button
         size="small"
+        icon={<FullscreenOutlined />}
+        title="撐滿"
         disabled={rightMode === 'max'}
         onClick={() => setRightMode('max')}
         data-loc="app:right:max"
-      >
-        撐滿
-      </Button>
+      />
       <Button
         size="small"
+        icon={<FullscreenExitOutlined />}
+        title="縮小(正常)"
         disabled={rightMode === 'normal'}
         onClick={() => setRightMode('normal')}
         data-loc="app:right:restore"
-      >
-        縮小
-      </Button>
+      />
       <Button
         size="small"
+        icon={<MinusOutlined />}
+        title="最小化"
         disabled={rightMode === 'min'}
         onClick={() => setRightMode('min')}
         data-loc="app:right:minimize"
-      >
-        最小化
-      </Button>
+      />
     </Space>
   );
 
@@ -289,23 +301,27 @@ export default function App() {
 
         <div style={rightRegionStyle}>{rightPanel}</div>
 
-        {/* 最小化:右緣 hover 條 → 叫回控制列 */}
+        {/* 最小化:右緣 hover 條 → 叫回控制列。選單與條當相鄰 flex 子元素(無死區),
+            移到選單仍在容器內 → 不會誤觸 mouseleave 而消失。 */}
         {rightMode === 'min' && (
           <div
-            onMouseEnter={() => setMinHover(true)}
-            onMouseLeave={() => setMinHover(false)}
-            style={{ position: 'absolute', top: 0, right: 0, height: '100%', zIndex: 20 }}
+            onMouseEnter={openMin}
+            onMouseLeave={closeMin}
+            style={{
+              position: 'absolute',
+              top: 0,
+              right: 0,
+              height: '100%',
+              zIndex: 20,
+              display: 'flex',
+              alignItems: 'flex-start',
+            }}
             data-loc="app:right:minbar"
           >
-            <div
-              style={{ height: '100%', width: 12, background: '#fafafa', borderLeft: '1px solid #f0f0f0', cursor: 'pointer' }}
-            />
             {minHover && (
               <div
                 style={{
-                  position: 'absolute',
-                  top: 8,
-                  right: 16,
+                  marginTop: 8,
                   background: '#fff',
                   border: '1px solid #f0f0f0',
                   borderRadius: 6,
@@ -316,6 +332,9 @@ export default function App() {
                 {controlBar}
               </div>
             )}
+            <div
+              style={{ height: '100%', width: 12, background: '#fafafa', borderLeft: '1px solid #f0f0f0', cursor: 'pointer' }}
+            />
           </div>
         )}
       </div>
