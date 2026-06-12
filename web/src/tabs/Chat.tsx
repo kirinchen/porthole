@@ -5,8 +5,8 @@
  *  - 送出 → POST /api/:repo/chat,SSE 逐字串回;後端把紀錄 append 到 doc/chat/<thread>.md
  */
 import { useEffect, useRef, useState } from 'react';
-import { Button, List, Spin, Alert, Typography, Space, Grid, Drawer } from 'antd';
-import { MenuOutlined } from '@ant-design/icons';
+import { Button, List, Spin, Alert, Typography, Space, Popover } from 'antd';
+import { UnorderedListOutlined } from '@ant-design/icons';
 import { api, type ThreadMeta } from '../lib/api';
 import MentionTextArea from '../components/MentionTextArea';
 import Markdown from '../components/Markdown';
@@ -27,10 +27,8 @@ export default function Chat({ repo }: Props) {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [listOpen, setListOpen] = useState(false); // 頂部 List 選單(thread 列表)
   const bottomRef = useRef<HTMLDivElement>(null);
-  const screens = Grid.useBreakpoint();
-  const isMobile = !screens.md; // <768px:thread 列表收進抽屜,對話區吃滿寬
 
   const loadThreads = () => {
     api
@@ -115,11 +113,11 @@ export default function Chat({ repo }: Props) {
     const name = `thread-${Date.now()}`;
     setActive(name);
     setTurns([]);
-    setDrawerOpen(false);
+    setListOpen(false);
   };
 
   const threadList = (
-    <>
+    <div style={{ width: 240, maxHeight: 360, overflow: 'auto' }} data-loc="chat:list">
       <Button block onClick={newThread} style={{ marginBottom: 8 }} data-loc="chat:thread:new">
         + 新對話
       </Button>
@@ -131,7 +129,7 @@ export default function Chat({ repo }: Props) {
           <List.Item
             onClick={() => {
               void openThread(t.name);
-              setDrawerOpen(false);
+              setListOpen(false);
             }}
             style={{
               cursor: 'pointer',
@@ -144,54 +142,38 @@ export default function Chat({ repo }: Props) {
           </List.Item>
         )}
       />
-    </>
+    </div>
   );
 
   return (
-    <div style={{ display: 'flex', height: '100%' }} data-loc="chat:root">
-      {!isMobile && (
-        <div
-          style={{ width: 220, borderRight: '1px solid #f0f0f0', padding: 8, overflow: 'auto' }}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }} data-loc="chat:root">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '8px 12px',
+          borderBottom: '1px solid #f0f0f0',
+        }}
+        data-loc="chat:topbar"
+      >
+        <Popover
+          trigger="click"
+          open={listOpen}
+          onOpenChange={setListOpen}
+          content={threadList}
+          placement="bottomLeft"
         >
-          {threadList}
-        </div>
-      )}
-
-      {isMobile && (
-        <Drawer
-          title="對話"
-          placement="left"
-          width={260}
-          open={drawerOpen}
-          onClose={() => setDrawerOpen(false)}
-          styles={{ body: { padding: 8 } }}
-          data-loc="chat:thread:drawer"
-        >
-          {threadList}
-        </Drawer>
-      )}
+          <Button icon={<UnorderedListOutlined />} data-loc="chat:list:toggle">
+            List
+          </Button>
+        </Popover>
+        <Typography.Text ellipsis style={{ flex: 1, minWidth: 0 }}>
+          {active}
+        </Typography.Text>
+      </div>
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        {isMobile && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '8px 12px',
-              borderBottom: '1px solid #f0f0f0',
-            }}
-          >
-            <Button
-              icon={<MenuOutlined />}
-              onClick={() => setDrawerOpen(true)}
-              data-loc="chat:thread:toggle"
-            />
-            <Typography.Text ellipsis style={{ flex: 1, minWidth: 0 }}>
-              {active}
-            </Typography.Text>
-          </div>
-        )}
         <div style={{ flex: 1, overflow: 'auto', padding: 16 }} data-loc="chat:messages">
           {err && <Alert type="error" message={err} style={{ marginBottom: 8 }} />}
           {turns.length === 0 && (

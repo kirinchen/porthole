@@ -4,7 +4,8 @@
  *  - 右:attach 進對應 tmux session(detach = 切走/關 WS,背景續跑)
  */
 import { useEffect, useState } from 'react';
-import { List, Button, Typography, Alert, Space, Tag, Popconfirm } from 'antd';
+import { List, Button, Typography, Alert, Space, Tag, Popconfirm, Popover } from 'antd';
+import { UnorderedListOutlined } from '@ant-design/icons';
 import Terminal from '../lib/Terminal';
 import { api, type ClaudeSession } from '../lib/api';
 
@@ -18,6 +19,7 @@ export default function Session({ repo }: Props) {
   const [attached, setAttached] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
+  const [listOpen, setListOpen] = useState(false); // 頂部 List 選單(session 列表)
 
   const refresh = () => {
     api
@@ -42,6 +44,7 @@ export default function Session({ repo }: Props) {
     try {
       const { name } = await api.startSession(repo, id);
       setAttached(name);
+      setListOpen(false); // 接上後關選單,露出終端
       refresh();
     } catch (e) {
       setErr((e as Error).message);
@@ -60,69 +63,96 @@ export default function Session({ repo }: Props) {
     }
   };
 
-  return (
-    <div style={{ display: 'flex', height: '100%' }} data-loc="session:root">
-      <div
-        style={{ width: 340, borderRight: '1px solid #f0f0f0', padding: 8, overflow: 'auto' }}
-        data-loc="session:list"
-      >
-        <Space style={{ marginBottom: 8 }}>
-          <Button size="small" onClick={refresh}>
-            重新整理
-          </Button>
-          {tmuxNames.length > 0 && <Tag color="green">{tmuxNames.length} 個背景 tmux</Tag>}
-        </Space>
-        {err && <Alert type="error" message={err} style={{ marginBottom: 8 }} />}
-        <List
-          size="small"
-          dataSource={sessions}
-          locale={{ emptyText: '此 repo 無可恢復 session' }}
-          renderItem={(s) => {
-            const tname = `porthole_${repo.replace(/[^A-Za-z0-9_]/g, '_')}_${s.id
-              .replace(/[^A-Za-z0-9_]/g, '')
-              .slice(0, 8)}`;
-            const live = tmuxNames.includes(tname);
-            return (
-              <List.Item style={{ display: 'block' }}>
-                <div style={{ marginBottom: 4 }}>
-                  <Typography.Text ellipsis style={{ maxWidth: 300 }} title={s.title}>
-                    {s.title}
-                  </Typography.Text>
-                </div>
-                <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                  {s.id.slice(0, 8)} · {new Date(s.mtime).toLocaleString()}
+  const sessionList = (
+    <div style={{ width: 340, maxHeight: 380, overflow: 'auto' }} data-loc="session:list">
+      {err && <Alert type="error" message={err} style={{ marginBottom: 8 }} />}
+      <List
+        size="small"
+        dataSource={sessions}
+        locale={{ emptyText: '此 repo 無可恢復 session' }}
+        renderItem={(s) => {
+          const tname = `porthole_${repo.replace(/[^A-Za-z0-9_]/g, '_')}_${s.id
+            .replace(/[^A-Za-z0-9_]/g, '')
+            .slice(0, 8)}`;
+          const live = tmuxNames.includes(tname);
+          return (
+            <List.Item style={{ display: 'block' }}>
+              <div style={{ marginBottom: 4 }}>
+                <Typography.Text ellipsis style={{ maxWidth: 300 }} title={s.title}>
+                  {s.title}
                 </Typography.Text>
-                <div style={{ marginTop: 6 }}>
-                  <Space>
-                    <Button
-                      size="small"
-                      type="primary"
-                      loading={starting === s.id}
-                      onClick={() => void start(s.id)}
-                    >
-                      {live ? 'attach' : '開背景並 attach'}
-                    </Button>
-                    {live && (
-                      <Popconfirm title="收掉這個 tmux session?" onConfirm={() => void kill(tname)}>
-                        <Button size="small" danger>
-                          收掉
-                        </Button>
-                      </Popconfirm>
-                    )}
-                  </Space>
-                </div>
-              </List.Item>
-            );
-          }}
-        />
+              </div>
+              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                {s.id.slice(0, 8)} · {new Date(s.mtime).toLocaleString()}
+              </Typography.Text>
+              <div style={{ marginTop: 6 }}>
+                <Space>
+                  <Button
+                    size="small"
+                    type="primary"
+                    loading={starting === s.id}
+                    onClick={() => void start(s.id)}
+                  >
+                    {live ? 'attach' : '開背景並 attach'}
+                  </Button>
+                  {live && (
+                    <Popconfirm title="收掉這個 tmux session?" onConfirm={() => void kill(tname)}>
+                      <Button size="small" danger>
+                        收掉
+                      </Button>
+                    </Popconfirm>
+                  )}
+                </Space>
+              </div>
+            </List.Item>
+          );
+        }}
+      />
+    </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }} data-loc="session:root">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '8px 12px',
+          borderBottom: '1px solid #f0f0f0',
+        }}
+        data-loc="session:topbar"
+      >
+        <Popover
+          trigger="click"
+          open={listOpen}
+          onOpenChange={setListOpen}
+          content={sessionList}
+          placement="bottomLeft"
+          title={
+            <Button size="small" onClick={refresh} data-loc="session:refresh">
+              重新整理
+            </Button>
+          }
+        >
+          <Button icon={<UnorderedListOutlined />} data-loc="session:list:toggle">
+            List
+          </Button>
+        </Popover>
+        {tmuxNames.length > 0 && <Tag color="green">{tmuxNames.length} 個背景 tmux</Tag>}
+        {attached && (
+          <Typography.Text type="secondary" ellipsis style={{ flex: 1, minWidth: 0 }}>
+            {attached}
+          </Typography.Text>
+        )}
       </div>
 
-      <div style={{ flex: 1, background: '#1e1e1e', padding: 8 }} data-loc="session:term">
+      <div style={{ flex: 1, background: '#1e1e1e', padding: 8, minHeight: 0 }} data-loc="session:term">
         {attached ? (
           <Terminal path={`/ws/tmux/${attached}`} sessionKey={attached} />
         ) : (
           <div style={{ color: '#888', padding: 16, fontFamily: 'monospace' }}>
-            選一個 session「開背景並 attach」。detach 只要切走或關閉,tmux 會在背景續跑。
+            開「List」選一個 session「開背景並 attach」。detach 只要切走或關閉,tmux 會在背景續跑。
           </div>
         )}
       </div>
