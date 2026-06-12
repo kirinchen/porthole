@@ -40,11 +40,28 @@ export const api = {
       `/api/${repo}/file?path=${encodeURIComponent(path)}`,
     ),
 
-  writeFile: async (repo: string, path: string, content: string) => {
+  writeFile: async (
+    repo: string,
+    path: string,
+    content: string,
+    encoding: 'utf8' | 'base64' = 'utf8',
+  ) => {
     const r = await fetch(`/api/${repo}/file`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, content }),
+      body: JSON.stringify({ path, content, encoding }),
+    });
+    if (!r.ok) {
+      const b = (await r.json().catch(() => ({}))) as { error?: string };
+      throw new Error(b.error ?? `HTTP ${r.status}`);
+    }
+  },
+
+  makeDir: async (repo: string, path: string) => {
+    const r = await fetch(`/api/${repo}/dir`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
     });
     if (!r.ok) {
       const b = (await r.json().catch(() => ({}))) as { error?: string };

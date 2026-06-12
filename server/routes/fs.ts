@@ -71,14 +71,20 @@ export default async function fsRoutes(app: FastifyInstance) {
   );
 
   // 寫檔:path-guard 鎖在 repo root 內;可覆寫既存或新增(含建中間目錄)。
-  app.put<{ Params: { repo: string }; Body: { path?: string; content?: string } }>(
+  // encoding=base64 → 寫二進位(上傳檔用);否則當 utf8 文字。
+  app.put<{
+    Params: { repo: string };
+    Body: { path?: string; content?: string; encoding?: 'utf8' | 'base64' };
+  }>(
     '/api/:repo/file',
-    { bodyLimit: 4 * 1024 * 1024 }, // 容納 2MB 檔 + JSON 包裝
+    { bodyLimit: 8 * 1024 * 1024 }, // base64 膨脹 ~33% → 放寬,實際大小以解碼後 MAX_FILE 為準
     async (req, reply) => {
       const rel = req.body?.path ?? '';
       const content = req.body?.content ?? '';
+      const encoding = req.body?.encoding === 'base64' ? 'base64' : 'utf8';
       if (!rel) return reply.code(400).send({ error: 'path required' });
-      if (Buffer.byteLength(content, 'utf8') > MAX_FILE) {
+      const buf = Buffer.from(content, encoding);
+      if (buf.byteLength > MAX_FILE) {
         return reply.code(413).send({ error: 'content too large' });
       }
       const target = guard.resolveInRepo(req.params.repo, rel);
@@ -89,7 +95,19 @@ export default async function fsRoutes(app: FastifyInstance) {
         /* 不存在 → 新檔,允許 */
       }
       await fs.mkdir(path.dirname(target), { recursive: true });
-      await fs.writeFile(target, content, 'utf8');
+      await fs.writeFile(target, buf);
+      return { ok: true };
+    },
+  );
+
+  // 新增目錄:path-guard 鎖在 repo root 內;recursive(含中間目錄)。
+  app.post<{ Params: { repo: string }; Body: { path?: string } }>(
+    '/api/:repo/dir',
+    async (req, reply) => {
+      const rel = req.body?.path ?? '';
+      if (!rel) return reply.code(400).send({ error: 'path required' });
+      const target = guard.resolveInRepo(req.params.repo, rel);
+      await fs.mkdir(target, { recursive: true });
       return { ok: true };
     },
   );

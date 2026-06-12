@@ -13,6 +13,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   lazy,
   Suspense,
@@ -26,6 +27,8 @@ import {
   SaveOutlined,
   CloseOutlined,
   FileAddOutlined,
+  FolderAddOutlined,
+  UploadOutlined,
   LeftOutlined,
   RightOutlined,
   ReloadOutlined,
@@ -56,6 +59,27 @@ function toNode(item: { name: string; path: string; type: 'dir' | 'file' }): Nod
 
 const isMd = (p: string) => /\.(md|markdown)$/i.test(p);
 
+/** repo 相對路徑的上層目錄('doc/note/a.md' → 'doc/note';'a.md' → '')。 */
+const parentDir = (p: string) => {
+  const i = p.lastIndexOf('/');
+  return i === -1 ? '' : p.slice(0, i);
+};
+/** 接 dir + name(dir 為空 = repo root)。 */
+const joinPath = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
+
+/** File → base64(去掉 data: 前綴),供上傳走 PUT encoding=base64。 */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const res = String(reader.result);
+      resolve(res.slice(res.indexOf(',') + 1));
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
 /** 不可變更新某 key 的 children。 */
 function updateChildren(nodes: Node[], key: string, children: Node[]): Node[] {
   return nodes.map((n) => {
@@ -82,10 +106,15 @@ interface ExploreCtx {
   saveErr: string | null;
   note: string | null;
   setNote: (s: string | null) => void;
+  baseDir: string; // 新增/上傳的所在目錄(依選取節點)
   newOpen: boolean;
   setNewOpen: (b: boolean) => void;
   newPath: string;
   setNewPath: (s: string) => void;
+  newDirOpen: boolean;
+  setNewDirOpen: (b: boolean) => void;
+  newDirName: string;
+  setNewDirName: (s: string) => void;
   treeMin: boolean;
   setTreeMin: (b: boolean) => void;
   onLoadData: (node: TreeDataNode) => Promise<void>;
@@ -95,6 +124,8 @@ interface ExploreCtx {
   cancelEdit: () => void;
   save: () => void;
   createNew: () => void;
+  createDir: () => void;
+  uploadFiles: (files: FileList) => void;
 }
 
 const Ctx = createContext<ExploreCtx | null>(null);
@@ -119,6 +150,9 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   const [note, setNote] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
   const [newPath, setNewPath] = useState('');
+  const [newDirOpen, setNewDirOpen] = useState(false);
+  const [newDirName, setNewDirName] = useState('');
+  const [baseDir, setBaseDir] = useState(''); // 選資料夾 → 該夾;選檔 → 其父夾;預設 root
   const [treeMin, setTreeMin] = useState(false);
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
@@ -134,6 +168,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setTree([]);
     setSel(null);
     setSelPath(null);
+    setBaseDir('');
     setEditing(false);
     setErr(null);
     reloadTree();
@@ -151,6 +186,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   const onSelect = async (_keys: React.Key[], info: { node: TreeDataNode }) => {
     const n = info.node as Node;
     setSelPath(n.path);
+    setBaseDir(n.isLeaf ? parentDir(n.path) : n.path); // 選檔→父夾;選資料夾→該夾
     if (!n.isLeaf) return; // 資料夾:只更新標題,不載預覽
     setLoadingFile(true);
     setErr(null);
@@ -212,9 +248,11 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     }
   };
 
+  // 新檔:只填名,建在 baseDir 下(可含子路徑)。
   const createNew = () => {
-    const p = newPath.trim().replace(/^[/\\]+/, '');
-    if (!p) return;
+    const name = newPath.trim().replace(/^[/\\]+/, '');
+    if (!name) return;
+    const p = joinPath(baseDir, name);
     setNewOpen(false);
     setNewPath('');
     setDrawerOpen(false);
@@ -225,6 +263,43 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setSelPath(p);
     setDraft('');
     setEditing(true);
+  };
+
+  // 新增目錄:名 → baseDir/名。
+  const createDir = async () => {
+    const name = newDirName.trim().replace(/^[/\\]+/, '');
+    if (!name) return;
+    const p = joinPath(baseDir, name);
+    setNewDirOpen(false);
+    setNewDirName('');
+    setDrawerOpen(false);
+    setErr(null);
+    setNote(null);
+    try {
+      await api.makeDir(repo, p);
+      reloadTree();
+      setNote(`已建目錄 ${p}`);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+
+  // 上傳:多檔 → 各讀成 base64 PUT 到 baseDir 下(同新增檔邏輯,走 path-guard)。
+  const uploadFiles = async (files: FileList) => {
+    setErr(null);
+    setNote(null);
+    try {
+      let n = 0;
+      for (const f of Array.from(files)) {
+        const b64 = await fileToBase64(f);
+        await api.writeFile(repo, joinPath(baseDir, f.name), b64, 'base64');
+        n++;
+      }
+      reloadTree();
+      setNote(`已上傳 ${n} 個檔到 ${baseDir || repo}`);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
   };
 
   const value: ExploreCtx = {
@@ -244,10 +319,15 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     saveErr,
     note,
     setNote,
+    baseDir,
     newOpen,
     setNewOpen,
     newPath,
     setNewPath,
+    newDirOpen,
+    setNewDirOpen,
+    newDirName,
+    setNewDirName,
     treeMin,
     setTreeMin,
     onLoadData,
@@ -257,6 +337,8 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     cancelEdit,
     save: () => void save(),
     createNew,
+    createDir: () => void createDir(),
+    uploadFiles: (files: FileList) => void uploadFiles(files),
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -265,15 +347,28 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
 /** 檔案樹面板(新檔 / 最小化鈕 + Tree)。 */
 function TreePanel() {
   const c = useExplore();
+  const fileRef = useRef<HTMLInputElement>(null);
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
         <Space.Compact>
           <Button
             icon={<FileAddOutlined />}
             onClick={() => c.setNewOpen(true)}
-            title="新檔"
+            title="新檔(在所在目錄)"
             data-loc="explore:file:new"
+          />
+          <Button
+            icon={<FolderAddOutlined />}
+            onClick={() => c.setNewDirOpen(true)}
+            title="新增目錄(在所在目錄)"
+            data-loc="explore:dir:new"
+          />
+          <Button
+            icon={<UploadOutlined />}
+            onClick={() => fileRef.current?.click()}
+            title="上傳檔案(到所在目錄)"
+            data-loc="explore:file:upload"
           />
           <Button
             icon={<ReloadOutlined />}
@@ -291,6 +386,24 @@ function TreePanel() {
           />
         )}
       </div>
+      <input
+        ref={fileRef}
+        type="file"
+        multiple
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          if (e.target.files?.length) c.uploadFiles(e.target.files);
+          e.target.value = '';
+        }}
+      />
+      <Typography.Text
+        type="secondary"
+        ellipsis
+        style={{ fontSize: 11, display: 'block', marginBottom: 8 }}
+        title={c.baseDir || '/'}
+      >
+        位置:{c.baseDir || '/'}
+      </Typography.Text>
       {c.err && <Alert type="error" message={c.err} style={{ marginBottom: 8 }} />}
       {c.tree.length === 0 && !c.err ? (
         <Spin />
@@ -473,14 +586,38 @@ export function ExplorePreview() {
         okButtonProps={{ disabled: !c.newPath.trim() }}
       >
         <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-          相對 {c.repo} root 的路徑(中間目錄會自動建立)。
+          在 <Typography.Text code>{c.baseDir || `${c.repo}/`}</Typography.Text> 下新增(可含子路徑,中間目錄自動建立)。
         </Typography.Paragraph>
         <Input
           value={c.newPath}
           onChange={(e) => c.setNewPath(e.target.value)}
           onPressEnter={c.createNew}
-          placeholder="例如 doc/note/idea.md"
+          placeholder="例如 idea.md"
           data-loc="explore:file:new:path"
+        />
+      </Modal>
+
+      <Modal
+        title="新增目錄"
+        open={c.newDirOpen}
+        onOk={c.createDir}
+        onCancel={() => {
+          c.setNewDirOpen(false);
+          c.setNewDirName('');
+        }}
+        okText="建立"
+        cancelText="取消"
+        okButtonProps={{ disabled: !c.newDirName.trim() }}
+      >
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+          在 <Typography.Text code>{c.baseDir || `${c.repo}/`}</Typography.Text> 下新增目錄(可含子路徑)。
+        </Typography.Paragraph>
+        <Input
+          value={c.newDirName}
+          onChange={(e) => c.setNewDirName(e.target.value)}
+          onPressEnter={c.createDir}
+          placeholder="例如 note"
+          data-loc="explore:dir:new:name"
         />
       </Modal>
     </div>
