@@ -18,7 +18,7 @@ import {
   CodeOutlined,
   DownOutlined,
 } from '@ant-design/icons';
-import Explore from './tabs/Explore';
+import Explore, { ExploreProvider, ExploreTree, ExplorePreview } from './tabs/Explore';
 import Chat from './tabs/Chat';
 import Session from './tabs/Session';
 import Cli from './tabs/Cli';
@@ -250,66 +250,76 @@ export default function App() {
     </div>
   );
 
-  // 右側容器樣式隨模式:正常=固定寬可拖;撐滿=絕對覆蓋工作區;最小化=隱藏(內容保活)。
-  const rightContainerStyle: React.CSSProperties =
-    rightMode === 'max'
-      ? { position: 'absolute', inset: 0, zIndex: 10, background: '#fff' }
-      : rightMode === 'min'
-        ? { display: 'none' }
+  // 三區佈局隨模式變寬:tree 固定在左恆亮;撐滿=收掉中央 preview、右側補上;
+  // 最小化=收掉右側、preview 補上(右緣留 hover 條)。preview/終端都不卸載。
+  const previewRegionStyle: React.CSSProperties =
+    rightMode === 'max' ? { display: 'none' } : { flex: 1, minWidth: 0 };
+  const rightRegionStyle: React.CSSProperties =
+    rightMode === 'min'
+      ? { display: 'none' }
+      : rightMode === 'max'
+        ? { flex: 1, minWidth: 0, borderLeft: '1px solid #f0f0f0' }
         : { width: rightWidth, flexShrink: 0, borderLeft: '1px solid #f0f0f0' };
 
   const desktopBody = !repo ? (
     <Alert type="info" message="basePath 下沒有可用的 repo" style={{ margin: 16 }} />
   ) : (
-    <div ref={workRef} style={{ display: 'flex', height: '100%', position: 'relative' }} data-loc="app:work">
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <Explore repo={repo} />
-      </div>
-
-      {rightMode === 'normal' && (
-        <div
-          onMouseDown={(e) => {
-            dragging.current = true;
-            document.body.style.userSelect = 'none';
-            e.preventDefault();
-          }}
-          style={{ width: 6, cursor: 'col-resize', background: '#f0f0f0', flexShrink: 0 }}
-          data-loc="app:right:drag"
-        />
-      )}
-
-      <div style={rightContainerStyle}>{rightPanel}</div>
-
-      {/* 最小化:右緣 hover 條 → 叫回控制列 */}
-      {rightMode === 'min' && (
-        <div
-          onMouseEnter={() => setMinHover(true)}
-          onMouseLeave={() => setMinHover(false)}
-          style={{ position: 'absolute', top: 0, right: 0, height: '100%', zIndex: 20 }}
-          data-loc="app:right:minbar"
-        >
-          <div
-            style={{ height: '100%', width: 12, background: '#fafafa', borderLeft: '1px solid #f0f0f0', cursor: 'pointer' }}
-          />
-          {minHover && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 8,
-                right: 16,
-                background: '#fff',
-                border: '1px solid #f0f0f0',
-                borderRadius: 6,
-                padding: 8,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              }}
-            >
-              {controlBar}
-            </div>
-          )}
+    <ExploreProvider repo={repo}>
+      <div
+        ref={workRef}
+        style={{ display: 'flex', height: '100%', position: 'relative' }}
+        data-loc="app:work"
+      >
+        <ExploreTree />
+        <div style={previewRegionStyle} data-loc="app:center">
+          <ExplorePreview />
         </div>
-      )}
-    </div>
+
+        {rightMode === 'normal' && (
+          <div
+            onMouseDown={(e) => {
+              dragging.current = true;
+              document.body.style.userSelect = 'none';
+              e.preventDefault();
+            }}
+            style={{ width: 6, cursor: 'col-resize', background: '#f0f0f0', flexShrink: 0 }}
+            data-loc="app:right:drag"
+          />
+        )}
+
+        <div style={rightRegionStyle}>{rightPanel}</div>
+
+        {/* 最小化:右緣 hover 條 → 叫回控制列 */}
+        {rightMode === 'min' && (
+          <div
+            onMouseEnter={() => setMinHover(true)}
+            onMouseLeave={() => setMinHover(false)}
+            style={{ position: 'absolute', top: 0, right: 0, height: '100%', zIndex: 20 }}
+            data-loc="app:right:minbar"
+          >
+            <div
+              style={{ height: '100%', width: 12, background: '#fafafa', borderLeft: '1px solid #f0f0f0', cursor: 'pointer' }}
+            />
+            {minHover && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 8,
+                  right: 16,
+                  background: '#fff',
+                  border: '1px solid #f0f0f0',
+                  borderRadius: 6,
+                  padding: 8,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                }}
+              >
+                {controlBar}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </ExploreProvider>
   );
 
   // 手機單窗格:依 tab 顯示單一區塊。

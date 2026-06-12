@@ -1,9 +1,23 @@
 /**
- * Explore tab — files tree(lazy)+ 點檔預覽 / 編輯。
- *  - 預覽:markdown 走 react-markdown,其餘純文字。
- *  - 編輯:可改既存檔、可新增檔(PUT /api/:repo/file);寫入面受 path-guard 鎖在 repo root 內。
+ * Explore — 檔案樹 + 預覽/編輯,拆成可獨立擺位的兩塊:
+ *   - <ExploreProvider repo>  共用狀態(樹、選取、編輯草稿…)
+ *   - <ExploreTree/>          檔案樹(桌面:左欄,可最小化;手機:Drawer)
+ *   - <ExplorePreview/>       預覽/編輯(中央主區)
+ * 拆開是為了讓 App 把樹固定在左欄、預覽放中央,右側面板「撐滿」時只蓋中央
+ * preview、樹仍在(三區佈局)。「樹/預覽要不要縮」由 Explore 自己控制。
+ *
+ * 預覽:markdown 走 react-markdown,其餘純文字。編輯:可改既存檔、可新增檔
+ * (PUT /api/:repo/file),寫入面受 path-guard 鎖在 repo root 內。
  */
-import { useEffect, useState, lazy, Suspense } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  lazy,
+  Suspense,
+  type ReactNode,
+} from 'react';
 import { Tree, Empty, Spin, Alert, Grid, Drawer, Button, Typography, Input, Modal, Space } from 'antd';
 import type { TreeDataNode } from 'antd';
 import {
@@ -20,10 +34,6 @@ import Markdown from '../components/Markdown';
 
 // CM6 編輯器較重 → lazy load(守「薄」)。mermaid/FlowEditor 在 MermaidBlock 內按需載入。
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor'));
-
-interface Props {
-  repo: string;
-}
 
 type Node = TreeDataNode & { path: string; isLeaf: boolean };
 
@@ -45,11 +55,59 @@ function toNode(item: { name: string; path: string; type: 'dir' | 'file' }): Nod
 
 const isMd = (p: string) => /\.(md|markdown)$/i.test(p);
 
-export default function Explore({ repo }: Props) {
+/** 不可變更新某 key 的 children。 */
+function updateChildren(nodes: Node[], key: string, children: Node[]): Node[] {
+  return nodes.map((n) => {
+    if (n.key === key) return { ...n, children };
+    if (n.children) return { ...n, children: updateChildren(n.children as Node[], key, children) };
+    return n;
+  });
+}
+
+interface ExploreCtx {
+  repo: string;
+  isMobile: boolean;
+  tree: Node[];
+  err: string | null;
+  sel: Selected | null;
+  selPath: string | null;
+  loadingFile: boolean;
+  drawerOpen: boolean;
+  setDrawerOpen: (b: boolean) => void;
+  editing: boolean;
+  draft: string;
+  setDraft: (s: string) => void;
+  saving: boolean;
+  saveErr: string | null;
+  note: string | null;
+  setNote: (s: string | null) => void;
+  newOpen: boolean;
+  setNewOpen: (b: boolean) => void;
+  newPath: string;
+  setNewPath: (s: string) => void;
+  treeMin: boolean;
+  setTreeMin: (b: boolean) => void;
+  onLoadData: (node: TreeDataNode) => Promise<void>;
+  onSelect: (keys: React.Key[], info: { node: TreeDataNode }) => void;
+  startEdit: () => void;
+  cancelEdit: () => void;
+  save: () => void;
+  createNew: () => void;
+}
+
+const Ctx = createContext<ExploreCtx | null>(null);
+
+function useExplore(): ExploreCtx {
+  const c = useContext(Ctx);
+  if (!c) throw new Error('useExplore 必須在 <ExploreProvider> 內使用');
+  return c;
+}
+
+export function ExploreProvider({ repo, children }: { repo: string; children: ReactNode }) {
   const [tree, setTree] = useState<Node[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [sel, setSel] = useState<Selected | null>(null);
-  const [selPath, setSelPath] = useState<string | null>(null); // 最後選取的節點(檔或資料夾)→ 標題
+  const [selPath, setSelPath] = useState<string | null>(null);
   const [loadingFile, setLoadingFile] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -59,9 +117,9 @@ export default function Explore({ repo }: Props) {
   const [note, setNote] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
   const [newPath, setNewPath] = useState('');
-  const [treeMin, setTreeMin] = useState(false); // 桌面:檔案樹最小化(只留叫回鈕)
+  const [treeMin, setTreeMin] = useState(false);
   const screens = Grid.useBreakpoint();
-  const isMobile = !screens.md; // <768px:檔案樹收進抽屜,預覽吃滿寬
+  const isMobile = !screens.md;
 
   const reloadTree = () => {
     api
@@ -90,7 +148,7 @@ export default function Explore({ repo }: Props) {
 
   const onSelect = async (_keys: React.Key[], info: { node: TreeDataNode }) => {
     const n = info.node as Node;
-    setSelPath(n.path); // 標題同步選取的節點(檔或資料夾)
+    setSelPath(n.path);
     if (!n.isLeaf) return; // 資料夾:只更新標題,不載預覽
     setLoadingFile(true);
     setErr(null);
@@ -155,21 +213,58 @@ export default function Explore({ repo }: Props) {
     setEditing(true);
   };
 
-  const treePanel = (
+  const value: ExploreCtx = {
+    repo,
+    isMobile,
+    tree,
+    err,
+    sel,
+    selPath,
+    loadingFile,
+    drawerOpen,
+    setDrawerOpen,
+    editing,
+    draft,
+    setDraft,
+    saving,
+    saveErr,
+    note,
+    setNote,
+    newOpen,
+    setNewOpen,
+    newPath,
+    setNewPath,
+    treeMin,
+    setTreeMin,
+    onLoadData,
+    onSelect,
+    startEdit,
+    cancelEdit,
+    save: () => void save(),
+    createNew,
+  };
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+/** 檔案樹面板(新檔 / 最小化鈕 + Tree)。 */
+function TreePanel() {
+  const c = useExplore();
+  return (
     <>
       <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
         <Button
           icon={<FileAddOutlined />}
-          onClick={() => setNewOpen(true)}
+          onClick={() => c.setNewOpen(true)}
           style={{ flex: 1 }}
           data-loc="explore:file:new"
         >
           新檔
         </Button>
-        {!isMobile && (
+        {!c.isMobile && (
           <Button
             icon={<LeftOutlined />}
-            onClick={() => setTreeMin(true)}
+            onClick={() => c.setTreeMin(true)}
             title="最小化檔案樹"
             data-loc="explore:tree:minimize"
           >
@@ -177,177 +272,194 @@ export default function Explore({ repo }: Props) {
           </Button>
         )}
       </div>
-      {err && <Alert type="error" message={err} style={{ marginBottom: 8 }} />}
-      {tree.length === 0 && !err ? (
+      {c.err && <Alert type="error" message={c.err} style={{ marginBottom: 8 }} />}
+      {c.tree.length === 0 && !c.err ? (
         <Spin />
       ) : (
-        <Tree.DirectoryTree treeData={tree} loadData={onLoadData} onSelect={onSelect} blockNode />
+        <Tree.DirectoryTree
+          treeData={c.tree}
+          loadData={c.onLoadData}
+          onSelect={c.onSelect}
+          blockNode
+        />
       )}
     </>
   );
+}
 
+/** 檔案樹:桌面 = 左欄(可最小化成細條);手機 = Drawer。 */
+export function ExploreTree() {
+  const c = useExplore();
+
+  if (c.isMobile) {
+    return (
+      <Drawer
+        title="檔案"
+        placement="left"
+        width={300}
+        open={c.drawerOpen}
+        onClose={() => c.setDrawerOpen(false)}
+        styles={{ body: { padding: 8 } }}
+        data-loc="explore:tree:drawer"
+      >
+        <TreePanel />
+      </Drawer>
+    );
+  }
+
+  return c.treeMin ? (
+    <div
+      style={{
+        width: 40,
+        borderRight: '1px solid #f0f0f0',
+        padding: 4,
+        display: 'flex',
+        justifyContent: 'center',
+      }}
+      data-loc="explore:tree:min"
+    >
+      <Button
+        icon={<RightOutlined />}
+        onClick={() => c.setTreeMin(false)}
+        title="原本(展開檔案樹)"
+        data-loc="explore:tree:restore"
+      />
+    </div>
+  ) : (
+    <div
+      style={{ width: 300, overflow: 'auto', borderRight: '1px solid #f0f0f0', padding: 8 }}
+      data-loc="explore:tree"
+    >
+      <TreePanel />
+    </div>
+  );
+}
+
+/** 預覽 / 編輯(中央主區)。 */
+export function ExplorePreview() {
+  const c = useExplore();
   return (
-    <div style={{ display: 'flex', height: '100%' }} data-loc="explore:root">
-      {!isMobile &&
-        (treeMin ? (
-          <div
-            style={{
-              width: 40,
-              borderRight: '1px solid #f0f0f0',
-              padding: 4,
-              display: 'flex',
-              justifyContent: 'center',
-            }}
-            data-loc="explore:tree:min"
-          >
-            <Button
-              icon={<RightOutlined />}
-              onClick={() => setTreeMin(false)}
-              title="原本(展開檔案樹)"
-              data-loc="explore:tree:restore"
-            />
-          </div>
-        ) : (
-          <div
-            style={{ width: 300, overflow: 'auto', borderRight: '1px solid #f0f0f0', padding: 8 }}
-            data-loc="explore:tree"
-          >
-            {treePanel}
-          </div>
-        ))}
-
-      {isMobile && (
-        <Drawer
-          title="檔案"
-          placement="left"
-          width={300}
-          open={drawerOpen}
-          onClose={() => setDrawerOpen(false)}
-          styles={{ body: { padding: 8 } }}
-          data-loc="explore:tree:drawer"
+    <div
+      style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
+      data-loc="explore:preview"
+    >
+      {(c.isMobile || c.sel || c.selPath) && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '8px 12px',
+            borderBottom: '1px solid #f0f0f0',
+          }}
+          data-loc="explore:toolbar"
         >
-          {treePanel}
-        </Drawer>
+          {c.isMobile && (
+            <Button
+              icon={<MenuOutlined />}
+              onClick={() => c.setDrawerOpen(true)}
+              data-loc="explore:tree:toggle"
+            />
+          )}
+          <Typography.Text ellipsis style={{ flex: 1, minWidth: 0 }}>
+            {c.selPath ?? '選一個項目'}
+            {c.sel?.isNew && c.selPath === c.sel.path ? ' (新檔)' : ''}
+          </Typography.Text>
+          {c.sel &&
+            (c.editing ? (
+              <Space.Compact>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  loading={c.saving}
+                  onClick={c.save}
+                  data-loc="explore:edit:save"
+                >
+                  儲存
+                </Button>
+                <Button icon={<CloseOutlined />} onClick={c.cancelEdit} data-loc="explore:edit:cancel">
+                  取消
+                </Button>
+              </Space.Compact>
+            ) : (
+              <Button icon={<EditOutlined />} onClick={c.startEdit} data-loc="explore:edit:start">
+                編輯
+              </Button>
+            ))}
+        </div>
+      )}
+
+      {(c.note || c.saveErr) && (
+        <div style={{ padding: '8px 12px 0' }}>
+          {c.note && (
+            <Alert type="success" message={c.note} closable onClose={() => c.setNote(null)} />
+          )}
+          {c.saveErr && (
+            <Alert type="error" message={c.saveErr} style={{ marginTop: c.note ? 8 : 0 }} />
+          )}
+        </div>
       )}
 
       <div
-        style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}
-        data-loc="explore:preview"
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflow: c.editing && c.sel?.markdown ? 'hidden' : 'auto',
+          padding: c.editing && c.sel?.markdown ? 0 : 16,
+        }}
       >
-        {(isMobile || sel || selPath) && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '8px 12px',
-              borderBottom: '1px solid #f0f0f0',
-            }}
-            data-loc="explore:toolbar"
-          >
-            {isMobile && (
-              <Button
-                icon={<MenuOutlined />}
-                onClick={() => setDrawerOpen(true)}
-                data-loc="explore:tree:toggle"
-              />
-            )}
-            <Typography.Text ellipsis style={{ flex: 1, minWidth: 0 }}>
-              {selPath ?? '選一個項目'}
-              {sel?.isNew && selPath === sel.path ? ' (新檔)' : ''}
-            </Typography.Text>
-            {sel &&
-              (editing ? (
-                <Space.Compact>
-                  <Button
-                    type="primary"
-                    icon={<SaveOutlined />}
-                    loading={saving}
-                    onClick={() => void save()}
-                    data-loc="explore:edit:save"
-                  >
-                    儲存
-                  </Button>
-                  <Button icon={<CloseOutlined />} onClick={cancelEdit} data-loc="explore:edit:cancel">
-                    取消
-                  </Button>
-                </Space.Compact>
-              ) : (
-                <Button icon={<EditOutlined />} onClick={startEdit} data-loc="explore:edit:start">
-                  編輯
-                </Button>
-              ))}
-          </div>
-        )}
-
-        {(note || saveErr) && (
-          <div style={{ padding: '8px 12px 0' }}>
-            {note && <Alert type="success" message={note} closable onClose={() => setNote(null)} />}
-            {saveErr && <Alert type="error" message={saveErr} style={{ marginTop: note ? 8 : 0 }} />}
-          </div>
-        )}
-
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            overflow: editing && sel?.markdown ? 'hidden' : 'auto',
-            padding: editing && sel?.markdown ? 0 : 16,
-          }}
-        >
-          {editing && sel ? (
-            sel.markdown ? (
-              <Suspense fallback={<Spin />}>
-                <MarkdownEditor key={sel.path} value={draft} onChange={setDraft} />
-              </Suspense>
-            ) : (
-              <Input.TextArea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                style={{
-                  height: '100%',
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                  fontSize: 13,
-                  resize: 'none',
-                }}
-                data-loc="explore:edit:textarea"
-              />
-            )
-          ) : loadingFile ? (
-            <Spin />
-          ) : !sel ? (
-            <Empty description="選一個檔案預覽" />
-          ) : sel.markdown ? (
-            <div className="md-preview">
-              <Markdown>{sel.content}</Markdown>
-            </div>
+        {c.editing && c.sel ? (
+          c.sel.markdown ? (
+            <Suspense fallback={<Spin />}>
+              <MarkdownEditor key={c.sel.path} value={c.draft} onChange={c.setDraft} />
+            </Suspense>
           ) : (
-            <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>
-              {sel.content}
-            </pre>
-          )}
-        </div>
+            <Input.TextArea
+              value={c.draft}
+              onChange={(e) => c.setDraft(e.target.value)}
+              style={{
+                height: '100%',
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                fontSize: 13,
+                resize: 'none',
+              }}
+              data-loc="explore:edit:textarea"
+            />
+          )
+        ) : c.loadingFile ? (
+          <Spin />
+        ) : !c.sel ? (
+          <Empty description="選一個檔案預覽" />
+        ) : c.sel.markdown ? (
+          <div className="md-preview">
+            <Markdown>{c.sel.content}</Markdown>
+          </div>
+        ) : (
+          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>
+            {c.sel.content}
+          </pre>
+        )}
       </div>
 
       <Modal
         title="新增檔案"
-        open={newOpen}
-        onOk={createNew}
+        open={c.newOpen}
+        onOk={c.createNew}
         onCancel={() => {
-          setNewOpen(false);
-          setNewPath('');
+          c.setNewOpen(false);
+          c.setNewPath('');
         }}
         okText="建立"
         cancelText="取消"
-        okButtonProps={{ disabled: !newPath.trim() }}
+        okButtonProps={{ disabled: !c.newPath.trim() }}
       >
         <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-          相對 {repo} root 的路徑(中間目錄會自動建立)。
+          相對 {c.repo} root 的路徑(中間目錄會自動建立)。
         </Typography.Paragraph>
         <Input
-          value={newPath}
-          onChange={(e) => setNewPath(e.target.value)}
-          onPressEnter={createNew}
+          value={c.newPath}
+          onChange={(e) => c.setNewPath(e.target.value)}
+          onPressEnter={c.createNew}
           placeholder="例如 doc/note/idea.md"
           data-loc="explore:file:new:path"
         />
@@ -356,11 +468,16 @@ export default function Explore({ repo }: Props) {
   );
 }
 
-/** 不可變更新某 key 的 children。 */
-function updateChildren(nodes: Node[], key: string, children: Node[]): Node[] {
-  return nodes.map((n) => {
-    if (n.key === key) return { ...n, children };
-    if (n.children) return { ...n, children: updateChildren(n.children as Node[], key, children) };
-    return n;
-  });
+/** 手機單窗格用:樹(Drawer)+ 預覽合一。 */
+export default function Explore({ repo }: { repo: string }) {
+  return (
+    <ExploreProvider repo={repo}>
+      <div style={{ display: 'flex', height: '100%' }} data-loc="explore:root">
+        <ExploreTree />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <ExplorePreview />
+        </div>
+      </div>
+    </ExploreProvider>
+  );
 }
