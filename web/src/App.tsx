@@ -1,18 +1,22 @@
 /**
  * App — porthole 殼。
- *  - 桌面(≥md):Obsidian/VSCode 式三欄。Explore(檔案樹 + 預覽/編輯)固定占
- *    左+中工作區;右側面板以 tab 切 Chat / Session / CLI,且**保活不卸載**
- *    (切走不斷 session WS)。中央/右側交界用 Splitter 可拖寬窄。
- *  - 手機(<md):三欄塞不下 → 沿用單窗格 + 左側四-Tab 切換。
- * active repo = URL path 第一段(/coral → coral);tab 進 URL hash。
+ *  - 桌面(≥md):Obsidian/VSCode 式。Explore(檔案樹 + 預覽/編輯)固定占左+中
+ *    工作區、恆亮;右側面板放 Chat / Session / CLI,**保活不卸載**(切走不斷
+ *    session WS)。右側面板有視窗控制:
+ *      Mode(下拉選 Chat/Session/CLI)· 撐滿(覆蓋中央)· 縮小(正常分割)· 最小化(隱藏,右緣 hover 叫回)。
+ *    正常模式中間有拖把可調右側寬。手動佈局(非 Splitter)以確保三態切換時
+ *    Explore / 終端都不卸載。
+ *  - 手機(<md):單窗格 + 左側四-Tab 切換。
+ * active repo = URL path 第一段;tab 進 URL hash。
  */
-import { useEffect, useState } from 'react';
-import { Layout, Menu, Select, Typography, Spin, Alert, Grid, Segmented, Splitter } from 'antd';
+import { useEffect, useRef, useState } from 'react';
+import { Layout, Menu, Select, Typography, Spin, Alert, Grid, Dropdown, Button, Space } from 'antd';
 import {
   FolderOpenOutlined,
   MessageOutlined,
   DesktopOutlined,
   CodeOutlined,
+  DownOutlined,
 } from '@ant-design/icons';
 import Explore from './tabs/Explore';
 import Chat from './tabs/Chat';
@@ -24,6 +28,7 @@ const { Header, Sider, Content } = Layout;
 
 type TabKey = 'explore' | 'chat' | 'session' | 'cli';
 type RightKey = 'chat' | 'session' | 'cli';
+type RightMode = 'normal' | 'max' | 'min';
 
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'explore', label: 'Explore', icon: <FolderOpenOutlined /> },
@@ -38,6 +43,8 @@ const RIGHT_TABS: { key: RightKey; label: string }[] = [
   { key: 'session', label: 'Session' },
   { key: 'cli', label: 'CLI' },
 ];
+
+const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
 function repoFromUrl(): string {
   return decodeURIComponent(location.pathname.split('/').filter(Boolean)[0] ?? '');
@@ -58,13 +65,38 @@ export default function App() {
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
 
-  // 桌面右側面板選擇:tab 為 explore(桌面左欄恆亮)時退回 chat。
+  // 右側面板:選哪個(tab=explore 時退回 chat)、視窗模式、正常模式寬度、最小化 hover。
   const rightSel: RightKey = tab === 'explore' ? 'chat' : tab;
+  const [rightMode, setRightMode] = useState<RightMode>('normal');
+  const [rightWidth, setRightWidth] = useState(480);
+  const [minHover, setMinHover] = useState(false);
+  const workRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+
   // 保活:右側已造訪過的 tab 一旦掛載就保留(切走只隱藏,不卸載 → 終端不斷)。
   const [visited, setVisited] = useState<Set<RightKey>>(() => new Set<RightKey>([rightSel]));
   useEffect(() => {
     setVisited((prev) => (prev.has(rightSel) ? prev : new Set(prev).add(rightSel)));
   }, [rightSel]);
+
+  // 正常模式:拖中間把手調右側寬。
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      if (!dragging.current || !workRef.current) return;
+      const rect = workRef.current.getBoundingClientRect();
+      setRightWidth(clamp(rect.right - e.clientX, 320, rect.width - 320));
+    };
+    const up = () => {
+      dragging.current = false;
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+  }, []);
 
   useEffect(() => {
     api
@@ -147,17 +179,57 @@ export default function App() {
     </Header>
   );
 
-  // 右側面板(桌面):tab bar + 保活內容(已造訪的都掛著,非 active 用 display:none)
+  // 右側控制列:Mode 下拉(選 Chat/Session/CLI)+ 撐滿 / 縮小 / 最小化。
+  const modeLabel = RIGHT_TABS.find((t) => t.key === rightSel)?.label ?? 'Chat';
+  const controlBar = (
+    <Space size={4}>
+      <Dropdown
+        trigger={['click']}
+        menu={{
+          items: RIGHT_TABS.map((t) => ({ key: t.key, label: t.label })),
+          selectedKeys: [rightSel],
+          onClick: ({ key }) => {
+            setTab(key as RightKey);
+            if (rightMode === 'min') setRightMode('normal'); // 從最小化選 Mode → 順手叫回
+          },
+        }}
+      >
+        <Button size="small" data-loc="app:right:mode">
+          Mode · {modeLabel} <DownOutlined />
+        </Button>
+      </Dropdown>
+      <Button
+        size="small"
+        disabled={rightMode === 'max'}
+        onClick={() => setRightMode('max')}
+        data-loc="app:right:max"
+      >
+        撐滿
+      </Button>
+      <Button
+        size="small"
+        disabled={rightMode === 'normal'}
+        onClick={() => setRightMode('normal')}
+        data-loc="app:right:restore"
+      >
+        縮小
+      </Button>
+      <Button
+        size="small"
+        disabled={rightMode === 'min'}
+        onClick={() => setRightMode('min')}
+        data-loc="app:right:minimize"
+      >
+        最小化
+      </Button>
+    </Space>
+  );
+
+  // 右側面板:控制列 + 保活內容(已造訪的都掛著,非 active 用 display:none)
   const rightPanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }} data-loc="app:right">
-      <div style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>
-        <Segmented
-          block
-          value={rightSel}
-          onChange={(v) => setTab(v as RightKey)}
-          options={RIGHT_TABS.map((t) => ({ label: t.label, value: t.key }))}
-          data-loc="app:right:tabs"
-        />
+      <div style={{ padding: 8, borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center' }}>
+        {controlBar}
       </div>
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {RIGHT_TABS.map(
@@ -178,18 +250,66 @@ export default function App() {
     </div>
   );
 
-  // 桌面三欄:Explore(樹+預覽)占左+中;右側面板。中央/右側可拖。
+  // 右側容器樣式隨模式:正常=固定寬可拖;撐滿=絕對覆蓋工作區;最小化=隱藏(內容保活)。
+  const rightContainerStyle: React.CSSProperties =
+    rightMode === 'max'
+      ? { position: 'absolute', inset: 0, zIndex: 10, background: '#fff' }
+      : rightMode === 'min'
+        ? { display: 'none' }
+        : { width: rightWidth, flexShrink: 0, borderLeft: '1px solid #f0f0f0' };
+
   const desktopBody = !repo ? (
     <Alert type="info" message="basePath 下沒有可用的 repo" style={{ margin: 16 }} />
   ) : (
-    <Splitter style={{ height: '100%' }}>
-      <Splitter.Panel min="30%">
+    <div ref={workRef} style={{ display: 'flex', height: '100%', position: 'relative' }} data-loc="app:work">
+      <div style={{ flex: 1, minWidth: 0 }}>
         <Explore repo={repo} />
-      </Splitter.Panel>
-      <Splitter.Panel defaultSize="40%" min="22%" max="68%" collapsible>
-        {rightPanel}
-      </Splitter.Panel>
-    </Splitter>
+      </div>
+
+      {rightMode === 'normal' && (
+        <div
+          onMouseDown={(e) => {
+            dragging.current = true;
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+          }}
+          style={{ width: 6, cursor: 'col-resize', background: '#f0f0f0', flexShrink: 0 }}
+          data-loc="app:right:drag"
+        />
+      )}
+
+      <div style={rightContainerStyle}>{rightPanel}</div>
+
+      {/* 最小化:右緣 hover 條 → 叫回控制列 */}
+      {rightMode === 'min' && (
+        <div
+          onMouseEnter={() => setMinHover(true)}
+          onMouseLeave={() => setMinHover(false)}
+          style={{ position: 'absolute', top: 0, right: 0, height: '100%', zIndex: 20 }}
+          data-loc="app:right:minbar"
+        >
+          <div
+            style={{ height: '100%', width: 12, background: '#fafafa', borderLeft: '1px solid #f0f0f0', cursor: 'pointer' }}
+          />
+          {minHover && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 8,
+                right: 16,
+                background: '#fff',
+                border: '1px solid #f0f0f0',
+                borderRadius: 6,
+                padding: 8,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+              }}
+            >
+              {controlBar}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 
   // 手機單窗格:依 tab 顯示單一區塊。

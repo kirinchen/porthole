@@ -12,6 +12,8 @@ import {
   SaveOutlined,
   CloseOutlined,
   FileAddOutlined,
+  LeftOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import { api } from '../lib/api';
 import Markdown from '../components/Markdown';
@@ -57,6 +59,7 @@ export default function Explore({ repo }: Props) {
   const [note, setNote] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
   const [newPath, setNewPath] = useState('');
+  const [treeMin, setTreeMin] = useState(false); // 桌面:檔案樹最小化(只留叫回鈕)
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md; // <768px:檔案樹收進抽屜,預覽吃滿寬
 
@@ -154,15 +157,26 @@ export default function Explore({ repo }: Props) {
 
   const treePanel = (
     <>
-      <Button
-        block
-        icon={<FileAddOutlined />}
-        onClick={() => setNewOpen(true)}
-        style={{ marginBottom: 8 }}
-        data-loc="explore:file:new"
-      >
-        新檔
-      </Button>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+        <Button
+          icon={<FileAddOutlined />}
+          onClick={() => setNewOpen(true)}
+          style={{ flex: 1 }}
+          data-loc="explore:file:new"
+        >
+          新檔
+        </Button>
+        {!isMobile && (
+          <Button
+            icon={<LeftOutlined />}
+            onClick={() => setTreeMin(true)}
+            title="最小化檔案樹"
+            data-loc="explore:tree:minimize"
+          >
+            最小化
+          </Button>
+        )}
+      </div>
       {err && <Alert type="error" message={err} style={{ marginBottom: 8 }} />}
       {tree.length === 0 && !err ? (
         <Spin />
@@ -174,14 +188,33 @@ export default function Explore({ repo }: Props) {
 
   return (
     <div style={{ display: 'flex', height: '100%' }} data-loc="explore:root">
-      {!isMobile && (
-        <div
-          style={{ width: 300, overflow: 'auto', borderRight: '1px solid #f0f0f0', padding: 8 }}
-          data-loc="explore:tree"
-        >
-          {treePanel}
-        </div>
-      )}
+      {!isMobile &&
+        (treeMin ? (
+          <div
+            style={{
+              width: 40,
+              borderRight: '1px solid #f0f0f0',
+              padding: 4,
+              display: 'flex',
+              justifyContent: 'center',
+            }}
+            data-loc="explore:tree:min"
+          >
+            <Button
+              icon={<RightOutlined />}
+              onClick={() => setTreeMin(false)}
+              title="原本(展開檔案樹)"
+              data-loc="explore:tree:restore"
+            />
+          </div>
+        ) : (
+          <div
+            style={{ width: 300, overflow: 'auto', borderRight: '1px solid #f0f0f0', padding: 8 }}
+            data-loc="explore:tree"
+          >
+            {treePanel}
+          </div>
+        ))}
 
       {isMobile && (
         <Drawer
