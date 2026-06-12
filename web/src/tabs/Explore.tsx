@@ -485,6 +485,7 @@ function TreePanel() {
         <Spin />
       ) : (
         <Tree.DirectoryTree
+          className="ph-tree"
           treeData={c.tree}
           loadData={c.onLoadData}
           onSelect={c.onSelect}

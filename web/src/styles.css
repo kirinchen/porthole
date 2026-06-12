@@ -43,7 +43,20 @@ body {
   max-width: 100%;
 }
 
-/* Explore 樹節點:hover / 選取時於名稱旁顯示改名 + 刪除 */
+/* Explore 樹節點:讓 icon + 標題同列(標題 flex:1 自適應),避免 width:100% 溢出換行 */
+.ph-tree .ant-tree-node-content-wrapper {
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+.ph-tree .ant-tree-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* hover / 選取時於名稱旁顯示改名 + 刪除 */
 .ph-row {
   display: inline-flex;
   align-items: center;
