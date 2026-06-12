@@ -46,14 +46,24 @@ export default function Terminal({ path, sessionKey }: Props) {
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'data', data: d }));
     });
 
+    let raf = 0;
     const onResize = () => {
-      fit.fit();
-      sendResize();
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        fit.fit(); // 容器 0 尺寸時 FitAddon 自動略過,安全
+        sendResize();
+      });
     };
     window.addEventListener('resize', onResize);
+    // 容器尺寸變化也要 refit:保活顯隱(display none→block)、Splitter 拖動、
+    // 右側面板收合,window resize 都不會觸發,靠 ResizeObserver 補。
+    const ro = new ResizeObserver(onResize);
+    ro.observe(hostRef.current);
 
     return () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener('resize', onResize);
+      ro.disconnect();
       ws.close();
       term.dispose();
     };

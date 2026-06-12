@@ -55,20 +55,27 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 
 ## 3. 佈局
 
-仿 Claude Desktop:左側窄欄四個 Tab(垂直 icon + label),右側主區。頂部一條 repo 選擇器(決定 active repo root,即 basePath 下哪個 repo)。
+**桌面(≥md)= Obsidian/VSCode 式三欄**。頂部一條 repo 選擇器(決定 active repo root)。
+Explore(檔案樹 + 預覽/編輯)固定占左+中工作區、恆亮;右側面板以 tab 切
+Chat / Session / CLI,**保活不卸載**(切走不斷 session 終端 WS)。中央/右側交界用
+可拖動 Splitter 調寬窄,右側可收合。目的:**邊編輯檔案邊與 session 對話**。
 
 ```
-┌──────────┬─────────────────────────────────┐
-│ [repo ▾] │  (主區:隨 active Tab 切換)        │
-│  Explore │                                 │
-│  Chat    │                                 │
-│  Session │                                 │
-│  CLI     │                                 │
-└──────────┴─────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│ [repo ▾]   porthole · 舷窗                                  │
+├──────────────┬───────────────────────────┬───────────────┤
+│ explore:tree │  explore:preview          │ [Chat|Session │
+│  檔案樹       │  檔案預覽 / 編輯(恆在中央)│  |CLI] 切換    │
+│  (左)        │            ←  拖  →        │  保活、可收合  │
+└──────────────┴───────────────────────────┴───────────────┘
 ```
+
+**手機(<md)= 單窗格**:三欄塞不下 → 退回左側窄欄四-Tab(Explore/Chat/Session/CLI)
+單選切換(舊 Claude Desktop 式),檔案樹於 Explore 內收進 Drawer。
 
 - **URL 狀態**:repo 走 pathname 第一段(`/coral`),active tab 走 hash(`/coral#chat`)。
-  reload / bookmark / 分享 / 上一頁皆可還原 repo+tab;hash 純前端,server 不參與。
+  桌面 hash 決定右側面板選哪個(Explore 恆亮,故 hash=explore 時右側預設 Chat);
+  手機 hash 決定單窗格顯示哪個。reload / bookmark / 上一頁皆可還原;hash 純前端,server 不參與。
 
 ---
 
