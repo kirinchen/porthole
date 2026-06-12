@@ -28,6 +28,7 @@ import {
   FileAddOutlined,
   LeftOutlined,
   RightOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import { api } from '../lib/api';
 import Markdown from '../components/Markdown';
@@ -89,6 +90,7 @@ interface ExploreCtx {
   setTreeMin: (b: boolean) => void;
   onLoadData: (node: TreeDataNode) => Promise<void>;
   onSelect: (keys: React.Key[], info: { node: TreeDataNode }) => void;
+  refresh: () => void;
   startEdit: () => void;
   cancelEdit: () => void;
   save: () => void;
@@ -198,6 +200,18 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     }
   };
 
+  // 重新整理:重載樹;若有開啟檔且非編輯中,重抓內容(看 agent 改後的結果)。
+  const refresh = () => {
+    reloadTree();
+    if (sel && !editing) {
+      const path = sel.path;
+      api
+        .file(repo, path)
+        .then((f) => setSel({ path, content: f.content, markdown: f.markdown }))
+        .catch((e: Error) => setErr(e.message));
+    }
+  };
+
   const createNew = () => {
     const p = newPath.trim().replace(/^[/\\]+/, '');
     if (!p) return;
@@ -238,6 +252,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setTreeMin,
     onLoadData,
     onSelect,
+    refresh,
     startEdit,
     cancelEdit,
     save: () => void save(),
@@ -253,12 +268,20 @@ function TreePanel() {
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-        <Button
-          icon={<FileAddOutlined />}
-          onClick={() => c.setNewOpen(true)}
-          title="新檔"
-          data-loc="explore:file:new"
-        />
+        <Space.Compact>
+          <Button
+            icon={<FileAddOutlined />}
+            onClick={() => c.setNewOpen(true)}
+            title="新檔"
+            data-loc="explore:file:new"
+          />
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={c.refresh}
+            title="重新整理(看 agent 改後結果)"
+            data-loc="explore:tree:refresh"
+          />
+        </Space.Compact>
         {!c.isMobile && (
           <Button
             icon={<LeftOutlined />}
