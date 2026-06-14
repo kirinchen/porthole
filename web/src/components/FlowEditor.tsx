@@ -5,7 +5,7 @@
  *  - 「套用」→ serializeFlow → onSave(正規化 mermaid 文字)。
  *  本元件較重(React Flow + dagre)→ 由 Explore 以 lazy + Suspense 載入。
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -26,7 +26,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import dagre from '@dagrejs/dagre';
 import { Button, Modal, Input, Select, Space, Typography } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, UndoOutlined, RedoOutlined } from '@ant-design/icons';
 import { parseFlow, serializeFlow, type FlowGraph, type FlowShape } from '../lib/mermaidFlow';
 
 const SHAPE_OPTS: { value: FlowShape; label: string }[] = [
@@ -87,6 +87,8 @@ interface Props {
 const NODE_W = 150;
 const NODE_H = 44;
 
+type Snap = { nodes: Node[]; edges: Edge[]; dir: string };
+
 function layout(nodes: Node[], edges: Edge[], dir: string): Node[] {
   const g = new dagre.graphlib.Graph();
   g.setGraph({ rankdir: dir === 'TD' ? 'TB' : dir, nodesep: 40, ranksep: 64 });
@@ -131,20 +133,121 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
   const [adding, setAdding] = useState<string | null>(null);
   const [addShape, setAddShape] = useState<FlowShape>('rect');
 
+  // 復原 / 重做:快照堆疊;copy/paste:剪貼簿 ref。
+  const [past, setPast] = useState<Snap[]>([]);
+  const [future, setFuture] = useState<Snap[]>([]);
+  const clipboard = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null);
+
+  // 在「變動之前」呼叫:把當前狀態推進 past、清空 future(上限 50)。
+  const takeSnapshot = useCallback(() => {
+    setPast((p) => [...p.slice(-49), { nodes, edges, dir }]);
+    setFuture([]);
+  }, [nodes, edges, dir]);
+
+  const undo = useCallback(() => {
+    if (!past.length) return;
+    const prev = past[past.length - 1];
+    setFuture((f) => [{ nodes, edges, dir }, ...f]);
+    setPast((p) => p.slice(0, -1));
+    setNodes(prev.nodes);
+    setEdges(prev.edges);
+    setDir(prev.dir);
+  }, [past, nodes, edges, dir]);
+
+  const redo = useCallback(() => {
+    if (!future.length) return;
+    const next = future[0];
+    setPast((p) => [...p, { nodes, edges, dir }]);
+    setFuture((f) => f.slice(1));
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    setDir(next.dir);
+  }, [future, nodes, edges, dir]);
+
+  const copy = useCallback(() => {
+    const sel = nodes.filter((n) => n.selected);
+    if (!sel.length) return;
+    const ids = new Set(sel.map((n) => n.id));
+    clipboard.current = {
+      nodes: sel,
+      edges: edges.filter((e) => ids.has(e.source) && ids.has(e.target)),
+    };
+  }, [nodes, edges]);
+
+  const paste = useCallback(() => {
+    const clip = clipboard.current;
+    if (!clip?.nodes.length) return;
+    takeSnapshot();
+    let s = seq;
+    const used = new Set(nodes.map((n) => n.id));
+    const idMap = new Map<string, string>();
+    const newNodes = clip.nodes.map((n) => {
+      let nid = `n${s++}`;
+      while (used.has(nid)) nid = `n${s++}`;
+      used.add(nid);
+      idMap.set(n.id, nid);
+      return {
+        ...n,
+        id: nid,
+        position: { x: n.position.x + 24, y: n.position.y + 24 },
+        selected: true,
+        data: { ...n.data },
+      };
+    });
+    const newEdges = clip.edges.map((e, i) => ({
+      ...e,
+      id: `e-paste-${s}-${i}`,
+      source: idMap.get(e.source) as string,
+      target: idMap.get(e.target) as string,
+      selected: false,
+    }));
+    setSeq(s);
+    setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), ...newNodes]);
+    setEdges((es) => [...es, ...newEdges]);
+  }, [nodes, seq, takeSnapshot]);
+
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if (k === 'y' || (k === 'z' && e.shiftKey)) {
+        e.preventDefault();
+        redo();
+      } else if (k === 'c') {
+        e.preventDefault();
+        copy();
+      } else if (k === 'v') {
+        e.preventDefault();
+        paste();
+      }
+    },
+    [undo, redo, copy, paste],
+  );
+
+  // 刪除(Delete 鍵 / 變動含 remove)前先快照,讓刪除可復原。
   const onNodesChange = useCallback(
-    (c: NodeChange[]) => setNodes((n) => applyNodeChanges(c, n)),
-    [],
+    (c: NodeChange[]) => {
+      if (c.some((x) => x.type === 'remove')) takeSnapshot();
+      setNodes((n) => applyNodeChanges(c, n));
+    },
+    [takeSnapshot],
   );
   const onEdgesChange = useCallback(
-    (c: EdgeChange[]) => setEdges((e) => applyEdgeChanges(c, e)),
-    [],
+    (c: EdgeChange[]) => {
+      if (c.some((x) => x.type === 'remove')) takeSnapshot();
+      setEdges((e) => applyEdgeChanges(c, e));
+    },
+    [takeSnapshot],
   );
   const onConnect = useCallback(
-    (c: Connection) =>
-      setEdges((e) =>
-        addEdge({ ...c, id: `e-${c.source}-${c.target}-${e.length}` }, e),
-      ),
-    [],
+    (c: Connection) => {
+      takeSnapshot();
+      setEdges((e) => addEdge({ ...c, id: `e-${c.source}-${c.target}-${e.length}` }, e));
+    },
+    [takeSnapshot],
   );
 
   const reLayout = (d = dir) => setNodes((n) => layout(n, edges, d));
@@ -152,6 +255,7 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
   const addNode = () => {
     const label = (adding ?? '').trim();
     if (!label) return;
+    takeSnapshot();
     let id = `n${seq}`;
     let s = seq;
     while (nodes.some((n) => n.id === id)) id = `n${++s}`;
@@ -166,6 +270,7 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
 
   const applyNodeLabel = () => {
     if (!editNode) return;
+    takeSnapshot();
     setNodes((ns) =>
       ns.map((n) =>
         n.id === editNode.id
@@ -178,6 +283,7 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
 
   const applyEdgeLabel = () => {
     if (!editEdge) return;
+    takeSnapshot();
     setEdges((es) =>
       es.map((e) => (e.id === editEdge.id ? { ...e, label: editEdge.label } : e)),
     );
@@ -186,6 +292,7 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
 
   const deleteEdge = () => {
     if (!editEdge) return;
+    takeSnapshot();
     setEdges((es) => es.filter((e) => e.id !== editEdge.id));
     setEditEdge(null);
   };
@@ -213,12 +320,17 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
         <Button icon={<PlusOutlined />} onClick={() => setAdding('')} data-loc="flow:add-node">
           新增節點
         </Button>
+        <Space.Compact>
+          <Button size="small" icon={<UndoOutlined />} disabled={!past.length} onClick={undo} title="復原(Ctrl+Z)" data-loc="flow:undo" />
+          <Button size="small" icon={<RedoOutlined />} disabled={!future.length} onClick={redo} title="重做(Ctrl+Y)" data-loc="flow:redo" />
+        </Space.Compact>
         <span>
           方向{' '}
           <Select
             size="small"
             value={dir}
             onChange={(d) => {
+              takeSnapshot();
               setDir(d);
               reLayout(d);
             }}
@@ -226,21 +338,33 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
             options={['TD', 'LR', 'BT', 'RL'].map((d) => ({ value: d, label: d }))}
           />
         </span>
-        <Button size="small" onClick={() => reLayout()}>
+        <Button
+          size="small"
+          onClick={() => {
+            takeSnapshot();
+            reLayout();
+          }}
+        >
           自動排版
         </Button>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          雙擊節點/邊改字 · 拖把手連線 · Delete 刪選取
+          雙擊改字 · 拖把手連線 · Delete 刪 · Ctrl+C/V 複製貼上 · Ctrl+Z/Y 復原重做
         </Typography.Text>
       </Space>
 
-      <div style={{ flex: 1, border: '1px solid #f0f0f0', borderRadius: 8, minHeight: 0 }}>
+      <div
+        style={{ flex: 1, border: '1px solid #f0f0f0', borderRadius: 8, minHeight: 0, outline: 'none' }}
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        data-loc="flow:canvas"
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onNodeDragStart={() => takeSnapshot()}
           onNodeDoubleClick={(_e, n) =>
             setEditNode({
               id: n.id,
