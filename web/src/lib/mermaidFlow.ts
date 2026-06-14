@@ -6,9 +6,11 @@
  * GUI 存檔走 serializeFlow → 正規化重寫該 mermaid 區塊(註解 / 手動排版 / 樣式會丟,已與使用者確認)。
  */
 
+export type FlowShape = 'rect' | 'round' | 'diamond';
 export interface FlowNode {
   id: string;
   label: string;
+  shape: FlowShape; // [] 矩形 / () 圓角 / {} 菱形(判斷)
 }
 export interface FlowEdge {
   source: string;
@@ -28,8 +30,11 @@ export function isFlowchart(code: string): boolean {
   return /^\s*(graph|flowchart)\b/i.test(code);
 }
 
-/** 抓節點規格:`id` / `id[label]` / `id(label)` / `id{label}` / `id["label"]`。回傳 id。 */
-function parseNodeSpec(p: string, ensure: (id: string, label?: string) => void): string {
+/** 抓節點規格:`id` / `id[label]`(矩形) / `id(label)`(圓角) / `id{label}`(菱形)。回傳 id。 */
+function parseNodeSpec(
+  p: string,
+  ensure: (id: string, label?: string, shape?: FlowShape) => void,
+): string {
   const s = p.trim();
   if (!s) return '';
   const m = /^([^\s[\](){}]+)\s*(?:\[([^\]]*)\]|\(([^)]*)\)|\{([^}]*)\})?$/.exec(s);
@@ -38,11 +43,22 @@ function parseNodeSpec(p: string, ensure: (id: string, label?: string) => void):
     return s;
   }
   const id = m[1];
-  let label = m[2] ?? m[3] ?? m[4];
+  let label: string | undefined;
+  let shape: FlowShape | undefined;
+  if (m[2] !== undefined) {
+    label = m[2];
+    shape = 'rect';
+  } else if (m[3] !== undefined) {
+    label = m[3];
+    shape = 'round';
+  } else if (m[4] !== undefined) {
+    label = m[4];
+    shape = 'diamond';
+  }
   if (label !== undefined) {
     label = label.trim().replace(/^"(.*)"$/s, '$1').replace(/^'(.*)'$/s, '$1');
   }
-  ensure(id, label);
+  ensure(id, label, shape);
   return id;
 }
 
@@ -51,7 +67,7 @@ const ARROW = /(?:-->|==>|-\.->|--x|--o|---|===|--|==)(?:\|([^|]*)\|)?/g;
 
 function parseStatement(
   stmt: string,
-  ensure: (id: string, label?: string) => void,
+  ensure: (id: string, label?: string, shape?: FlowShape) => void,
   edges: FlowEdge[],
 ): void {
   const parts: string[] = [];
@@ -91,13 +107,14 @@ export function parseFlow(code: string): FlowGraph {
   }
 
   const nodes = new Map<string, FlowNode>();
-  const ensure = (id: string, label?: string) => {
+  const ensure = (id: string, label?: string, shape?: FlowShape) => {
     const ex = nodes.get(id);
     if (ex) {
       if (label !== undefined) ex.label = label;
+      if (shape) ex.shape = shape;
       return;
     }
-    nodes.set(id, { id, label: label ?? id });
+    nodes.set(id, { id, label: label ?? id, shape: shape ?? 'rect' });
   };
   const edges: FlowEdge[] = [];
 
@@ -118,8 +135,14 @@ export function serializeFlow(g: FlowGraph): string {
   const dir = DIRS.has(g.dir) ? g.dir : 'TD';
   const lines = [`flowchart ${dir}`];
   for (const n of g.nodes) {
-    if (n.label && n.label !== n.id) lines.push(`    ${n.id}["${escapeLabel(n.label)}"]`);
-    else lines.push(`    ${n.id}`);
+    const shape = n.shape ?? 'rect';
+    if (shape === 'rect') {
+      if (n.label && n.label !== n.id) lines.push(`    ${n.id}["${escapeLabel(n.label)}"]`);
+      else lines.push(`    ${n.id}`);
+    } else {
+      const [open, close] = shape === 'diamond' ? ['{', '}'] : ['(', ')'];
+      lines.push(`    ${n.id}${open}"${escapeLabel(n.label || n.id)}"${close}`);
+    }
   }
   for (const e of g.edges) {
     if (e.label) lines.push(`    ${e.source} -->|${e.label}| ${e.target}`);
