@@ -8,6 +8,7 @@ import { List, Button, Typography, Alert, Space, Tag, Popconfirm, Popover } from
 import { UnorderedListOutlined, DesktopOutlined } from '@ant-design/icons';
 import Terminal from '../lib/Terminal';
 import { api, type ClaudeSession } from '../lib/api';
+import { getSessionAgent } from '../lib/settings';
 
 interface Props {
   repo: string;
@@ -57,7 +58,7 @@ export default function Session({ repo }: Props) {
   const newSession = async () => {
     setErr(null);
     try {
-      const { name } = await api.newSession(repo);
+      const { name } = await api.newSession(repo, getSessionAgent());
       setAttached(name);
       setListOpen(false);
       refresh();

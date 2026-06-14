@@ -112,8 +112,12 @@ export const api = {
     return (await r.json()) as { name: string };
   },
 
-  newSession: async (repo: string) => {
-    const r = await fetch(`/api/${repo}/sessions/new`, { method: 'POST' });
+  newSession: async (repo: string, agent = 'claude') => {
+    const r = await fetch(`/api/${repo}/sessions/new`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent }),
+    });
     if (!r.ok) {
       const b = (await r.json().catch(() => ({}))) as { error?: string };
       throw new Error(b.error ?? `HTTP ${r.status}`);

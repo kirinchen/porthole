@@ -116,9 +116,10 @@ export function newTmuxName(repo: string): string {
   return `porthole_${safeRepo}_new${Date.now()}`;
 }
 
-/** 開全新背景 tmux 跑 `claude`(不 resume,起一段全新 claude session)。 */
-export async function startFreshTmux(name: string, cwd: string): Promise<void> {
-  await pexec('tmux', ['new-session', '-d', '-s', name, '-c', cwd, 'claude']);
+/** 開全新背景 tmux 跑指定 agent(預設 claude;不 resume,起一段全新 session)。
+ *  agent 由 routes 以白名單驗證後才傳入(走 argv,不經 shell)。 */
+export async function startFreshTmux(name: string, cwd: string, agent = 'claude'): Promise<void> {
+  await pexec('tmux', ['new-session', '-d', '-s', name, '-c', cwd, agent]);
 }
 
 /** 確保背景 tmux session 存在;不存在則建立並在內跑 `claude --resume <id>`。 */

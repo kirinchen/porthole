@@ -22,6 +22,9 @@ import {
 import { bridgePty } from '../lib/pty-bridge.ts';
 import { isSameOriginWs } from '../lib/ws-origin.ts';
 
+// 新 session 可用的 agent 白名單(避免客戶端塞任意程式進 tmux exec)。
+const SESSION_AGENTS = new Set(['claude', 'gemini']);
+
 function assertPortholeName(name: string): void {
   if (!/^porthole_[A-Za-z0-9_]+$/.test(name)) {
     throw Object.assign(new Error('invalid tmux name'), { statusCode: 400 });
@@ -45,13 +48,20 @@ export default async function sessionRoutes(app: FastifyInstance) {
     },
   );
 
-  // 開全新背景 session(裸 tmux 跑 claude),回 tmux 名供之後 attach。
-  app.post<{ Params: { repo: string } }>('/api/:repo/sessions/new', async (req) => {
-    const root = guard.repoRoot(req.params.repo);
-    const name = newTmuxName(req.params.repo);
-    await startFreshTmux(name, root);
-    return { name };
-  });
+  // 開全新背景 session(裸 tmux 跑指定 agent),回 tmux 名供之後 attach。
+  app.post<{ Params: { repo: string }; Body: { agent?: string } }>(
+    '/api/:repo/sessions/new',
+    async (req, reply) => {
+      const agent = req.body?.agent ?? 'claude';
+      if (!SESSION_AGENTS.has(agent)) {
+        return reply.code(400).send({ error: `unsupported agent: ${agent}` });
+      }
+      const root = guard.repoRoot(req.params.repo);
+      const name = newTmuxName(req.params.repo);
+      await startFreshTmux(name, root, agent);
+      return { name };
+    },
+  );
 
   app.get('/api/tmux', async () => {
     return { sessions: await listTmux() };
