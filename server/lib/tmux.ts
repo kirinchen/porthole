@@ -110,6 +110,17 @@ export async function tmuxExists(name: string): Promise<boolean> {
   }
 }
 
+/** 全新背景 session 的 tmux 名(無 claude session id → 用時間戳,仍合白名單)。 */
+export function newTmuxName(repo: string): string {
+  const safeRepo = repo.replace(/[^A-Za-z0-9_]/g, '_');
+  return `porthole_${safeRepo}_new${Date.now()}`;
+}
+
+/** 開全新背景 tmux 跑 `claude`(不 resume,起一段全新 claude session)。 */
+export async function startFreshTmux(name: string, cwd: string): Promise<void> {
+  await pexec('tmux', ['new-session', '-d', '-s', name, '-c', cwd, 'claude']);
+}
+
 /** 確保背景 tmux session 存在;不存在則建立並在內跑 `claude --resume <id>`。 */
 export async function ensureTmux(name: string, cwd: string, claudeSessionId: string): Promise<void> {
   if (await tmuxExists(name)) return;

@@ -66,6 +66,47 @@ export default function Session({ repo }: Props) {
   const sessionList = (
     <div style={{ width: 340, maxHeight: 380, overflow: 'auto' }} data-loc="session:list">
       {err && <Alert type="error" message={err} style={{ marginBottom: 8 }} />}
+      {tmuxNames.length > 0 && (
+        <div style={{ marginBottom: 8 }} data-loc="session:tmux">
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+            背景 tmux session
+          </Typography.Text>
+          <List
+            size="small"
+            dataSource={tmuxNames}
+            renderItem={(name) => (
+              <List.Item style={{ display: 'block' }}>
+                <Typography.Text ellipsis style={{ fontSize: 12, display: 'block' }} title={name}>
+                  {name}
+                </Typography.Text>
+                <div style={{ marginTop: 4 }}>
+                  <Space>
+                    <Button
+                      size="small"
+                      type="primary"
+                      onClick={() => {
+                        setAttached(name);
+                        setListOpen(false);
+                      }}
+                    >
+                      attach
+                    </Button>
+                    <Popconfirm title="收掉這個 tmux session?" onConfirm={() => void kill(name)}>
+                      <Button size="small" danger>
+                        收掉
+                      </Button>
+                    </Popconfirm>
+                  </Space>
+                </div>
+              </List.Item>
+            )}
+          />
+          <div style={{ borderTop: '1px solid #f0f0f0', margin: '8px 0 4px' }} />
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+            可恢復 claude session
+          </Typography.Text>
+        </div>
+      )}
       <List
         size="small"
         dataSource={sessions}

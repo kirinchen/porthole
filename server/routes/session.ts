@@ -16,6 +16,8 @@ import {
   killTmux,
   tmuxName,
   tmuxExists,
+  newTmuxName,
+  startFreshTmux,
 } from '../lib/tmux.ts';
 import { bridgePty } from '../lib/pty-bridge.ts';
 import { isSameOriginWs } from '../lib/ws-origin.ts';
@@ -42,6 +44,14 @@ export default async function sessionRoutes(app: FastifyInstance) {
       return { name };
     },
   );
+
+  // 開全新背景 session(裸 tmux 跑 claude),回 tmux 名供之後 attach。
+  app.post<{ Params: { repo: string } }>('/api/:repo/sessions/new', async (req) => {
+    const root = guard.repoRoot(req.params.repo);
+    const name = newTmuxName(req.params.repo);
+    await startFreshTmux(name, root);
+    return { name };
+  });
 
   app.get('/api/tmux', async () => {
     return { sessions: await listTmux() };
