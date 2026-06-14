@@ -6,7 +6,8 @@
  *  - securityLevel='strict':渲染 repo 檔 / LLM 內容,擋 script / click 注入。
  */
 import { useEffect, useRef, useState, lazy, Suspense } from 'react';
-import { Segmented, Input, Button, Space, Spin } from 'antd';
+import { Segmented, Input, Button, Space, Spin, Switch } from 'antd';
+import { FullscreenOutlined } from '@ant-design/icons';
 import type { SegmentedValue } from 'antd/es/segmented';
 import { isFlowchart } from '../lib/mermaidFlow';
 
@@ -44,6 +45,7 @@ export default function MermaidBlock({ code, onApply }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>('preview');
   const [draft, setDraft] = useState(code);
+  const [guiFull, setGuiFull] = useState(false); // GUI 全螢幕(滿版覆蓋視窗)
 
   const editable = !!onApply;
   const flow = isFlowchart(code);
@@ -74,6 +76,7 @@ export default function MermaidBlock({ code, onApply }: Props) {
   const onTab = (v: SegmentedValue) => {
     const m = v as Mode;
     if (m === 'edit') setDraft(code); // 進編輯時以目前內容為準
+    if (m !== 'gui') setGuiFull(false); // 離開 GUI → 取消全螢幕
     setMode(m);
   };
 
@@ -87,7 +90,22 @@ export default function MermaidBlock({ code, onApply }: Props) {
       }}
     >
       {editable && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          {mode === 'gui' && (
+            <span
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+              data-loc="mermaid:gui:full"
+            >
+              <FullscreenOutlined style={{ color: '#888' }} />
+              <Switch
+                size="small"
+                checked={guiFull}
+                onChange={setGuiFull}
+                title="全螢幕"
+                data-loc="mermaid:gui:full:switch"
+              />
+            </span>
+          )}
           <Segmented size="small" value={mode} onChange={onTab} options={opts} data-loc="mermaid:tabs" />
         </div>
       )}
@@ -139,18 +157,49 @@ export default function MermaidBlock({ code, onApply }: Props) {
         </div>
       )}
 
-      {mode === 'gui' && (
-        <Suspense fallback={<Spin />}>
-          <FlowEditor
-            code={code}
-            onSave={(c) => {
-              onApply?.(c);
-              setMode('preview');
-            }}
-            onClose={() => setMode('preview')}
-          />
-        </Suspense>
-      )}
+      {mode === 'gui' &&
+        (() => {
+          const editor = (
+            <Suspense fallback={<Spin />}>
+              <FlowEditor
+                code={code}
+                fill={guiFull}
+                onSave={(c) => {
+                  onApply?.(c);
+                  setGuiFull(false);
+                  setMode('preview');
+                }}
+                onClose={() => {
+                  setGuiFull(false);
+                  setMode('preview');
+                }}
+              />
+            </Suspense>
+          );
+          if (!guiFull) return editor;
+          return (
+            <div
+              style={{
+                position: 'fixed',
+                inset: 0,
+                zIndex: 1000,
+                background: '#fff',
+                padding: 12,
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+              data-loc="mermaid:gui:overlay"
+            >
+              <div
+                style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginBottom: 8 }}
+              >
+                <FullscreenOutlined style={{ color: '#888' }} />
+                <Switch size="small" checked={guiFull} onChange={setGuiFull} title="退出全螢幕" />
+              </div>
+              <div style={{ flex: 1, minHeight: 0 }}>{editor}</div>
+            </div>
+          );
+        })()}
     </div>
   );
 }

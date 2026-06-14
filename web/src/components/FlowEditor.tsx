@@ -30,6 +30,8 @@ interface Props {
   code: string;
   onSave: (code: string) => void;
   onClose: () => void;
+  /** 滿版模式:撐滿父容器高度(由 MermaidBlock 的全螢幕切換帶入)。 */
+  fill?: boolean;
 }
 
 const NODE_W = 150;
@@ -48,7 +50,7 @@ function layout(nodes: Node[], edges: Edge[], dir: string): Node[] {
   });
 }
 
-export default function FlowEditor({ code, onSave, onClose }: Props) {
+export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
   const init = useMemo(() => {
     const gph = parseFlow(code);
     const ns: Node[] = gph.nodes.map((n) => ({
@@ -138,7 +140,7 @@ export default function FlowEditor({ code, onSave, onClose }: Props) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '70vh' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: fill ? '100%' : '70vh' }}>
       <Space wrap style={{ marginBottom: 8 }}>
         <Button icon={<PlusOutlined />} onClick={() => setAdding('')} data-loc="flow:add-node">
           新增節點
