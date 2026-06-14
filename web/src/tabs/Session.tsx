@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from 'react';
 import { List, Button, Typography, Alert, Space, Tag, Popconfirm, Popover } from 'antd';
-import { UnorderedListOutlined } from '@ant-design/icons';
+import { UnorderedListOutlined, DesktopOutlined } from '@ant-design/icons';
 import Terminal from '../lib/Terminal';
 import { api, type ClaudeSession } from '../lib/api';
 
@@ -50,6 +50,19 @@ export default function Session({ repo }: Props) {
       setErr((e as Error).message);
     } finally {
       setStarting(null);
+    }
+  };
+
+  // 開全新背景 session(裸 tmux 跑 claude)→ 開好直接 attach。
+  const newSession = async () => {
+    setErr(null);
+    try {
+      const { name } = await api.newSession(repo);
+      setAttached(name);
+      setListOpen(false);
+      refresh();
+    } catch (e) {
+      setErr((e as Error).message);
     }
   };
 
@@ -180,6 +193,14 @@ export default function Session({ repo }: Props) {
             List
           </Button>
         </Popover>
+        <Button
+          icon={<DesktopOutlined />}
+          onClick={() => void newSession()}
+          title="開全新背景 session(claude)並 attach"
+          data-loc="session:new"
+        >
+          新 session
+        </Button>
         {tmuxNames.length > 0 && <Tag color="green">{tmuxNames.length} 個背景 tmux</Tag>}
         {attached && (
           <Typography.Text type="secondary" ellipsis style={{ flex: 1, minWidth: 0 }}>

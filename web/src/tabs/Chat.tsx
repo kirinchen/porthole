@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { Button, List, Spin, Alert, Typography, Space, Popover } from 'antd';
-import { UnorderedListOutlined, DesktopOutlined } from '@ant-design/icons';
+import { UnorderedListOutlined } from '@ant-design/icons';
 import { api, type ThreadMeta } from '../lib/api';
 import MentionTextArea from '../components/MentionTextArea';
 import Markdown from '../components/Markdown';
@@ -28,20 +28,7 @@ export default function Chat({ repo }: Props) {
   const [streaming, setStreaming] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false); // 頂部 List 選單(thread 列表)
-  const [sessionNote, setSessionNote] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  // 開全新背景 tmux session(跑 claude),之後可在 Session tab attach。
-  const newSession = async () => {
-    setErr(null);
-    setSessionNote(null);
-    try {
-      const { name } = await api.newSession(repo);
-      setSessionNote(`已開背景 session:${name} — 到右側 Mode → Session 重新整理後 attach`);
-    } catch (e) {
-      setErr((e as Error).message);
-    }
-  };
 
   const loadThreads = () => {
     api
@@ -181,27 +168,10 @@ export default function Chat({ repo }: Props) {
             List
           </Button>
         </Popover>
-        <Button
-          icon={<DesktopOutlined />}
-          onClick={() => void newSession()}
-          title="開背景 session(claude),之後可在 Session attach"
-          data-loc="chat:session:new"
-        >
-          新 session
-        </Button>
         <Typography.Text ellipsis style={{ flex: 1, minWidth: 0 }}>
           {active}
         </Typography.Text>
       </div>
-      {sessionNote && (
-        <Alert
-          type="success"
-          message={sessionNote}
-          closable
-          onClose={() => setSessionNote(null)}
-          style={{ margin: '8px 12px 0' }}
-        />
-      )}
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 1, overflow: 'auto', padding: 16 }} data-loc="chat:messages">
