@@ -6,6 +6,7 @@
  *  - securityLevel='strict':渲染 repo 檔 / LLM 內容,擋 script / click 注入。
  */
 import { useEffect, useRef, useState, lazy, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import { Segmented, Input, Button, Space, Spin, Switch } from 'antd';
 import { FullscreenOutlined } from '@ant-design/icons';
 import type { SegmentedValue } from 'antd/es/segmented';
@@ -177,12 +178,15 @@ export default function MermaidBlock({ code, onApply }: Props) {
             </Suspense>
           );
           if (!guiFull) return editor;
-          return (
+          // portal 到 body:脫離 CM6/編輯器祖先的 containing block,fixed 才能真正
+          // 覆蓋整個視窗(否則只蓋中央、右側 Chat 仍露出)。z-index 低於 antd modal(1000)
+          // 以便 FlowEditor 的節點/邊編輯視窗仍在最上層。
+          return createPortal(
             <div
               style={{
                 position: 'fixed',
                 inset: 0,
-                zIndex: 1000,
+                zIndex: 900,
                 background: '#fff',
                 padding: 12,
                 display: 'flex',
@@ -197,7 +201,8 @@ export default function MermaidBlock({ code, onApply }: Props) {
                 <Switch size="small" checked={guiFull} onChange={setGuiFull} title="退出全螢幕" />
               </div>
               <div style={{ flex: 1, minHeight: 0 }}>{editor}</div>
-            </div>
+            </div>,
+            document.body,
           );
         })()}
     </div>
