@@ -96,6 +96,21 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+/** 重抓整棵樹:根層 + 對「目前展開」的資料夾遞迴補抓 children(供 refresh 用)。 */
+async function fetchTreeWithExpanded(repo: string, expanded: Set<string>): Promise<Node[]> {
+  const build = async (rel: string): Promise<Node[]> => {
+    const r = await api.tree(repo, rel || '.');
+    const nodes = r.items.map(toNode);
+    for (const n of nodes) {
+      if (!n.isLeaf && expanded.has(n.path)) {
+        n.children = await build(n.path);
+      }
+    }
+    return nodes;
+  };
+  return build('');
+}
+
 /** 不可變更新某 key 的 children。 */
 function updateChildren(nodes: Node[], key: string, children: Node[]): Node[] {
   return nodes.map((n) => {
@@ -109,6 +124,10 @@ interface ExploreCtx {
   repo: string;
   isMobile: boolean;
   tree: Node[];
+  expandedKeys: React.Key[];
+  setExpandedKeys: (k: React.Key[]) => void;
+  loadedKeys: React.Key[];
+  setLoadedKeys: (k: React.Key[]) => void;
   err: string | null;
   sel: Selected | null;
   selPath: string | null;
@@ -161,6 +180,8 @@ function useExplore(): ExploreCtx {
 
 export function ExploreProvider({ repo, children }: { repo: string; children: ReactNode }) {
   const [tree, setTree] = useState<Node[]>([]);
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+  const [loadedKeys, setLoadedKeys] = useState<React.Key[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [sel, setSel] = useState<Selected | null>(null);
   const [selPath, setSelPath] = useState<string | null>(null);
@@ -183,11 +204,17 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
 
-  const reloadTree = () => {
-    api
-      .tree(repo, '.')
-      .then((r) => setTree(r.items.map(toNode)))
-      .catch((e: Error) => setErr(e.message));
+  // 重載樹但保留目前展開:對展開的資料夾遞迴重抓 children,並同步 loadedKeys
+  // (否則 antd 視展開節點為已載入,新節點無 children → 顯示空,即 refresh bug)。
+  const reloadTree = async () => {
+    const expanded = new Set(expandedKeys.map(String));
+    try {
+      const nodes = await fetchTreeWithExpanded(repo, expanded);
+      setTree(nodes);
+      setLoadedKeys(Array.from(expanded));
+    } catch (e) {
+      setErr((e as Error).message);
+    }
   };
 
   useEffect(() => {
@@ -195,9 +222,15 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setSel(null);
     setSelPath(null);
     setBaseDir('');
+    setExpandedKeys([]);
+    setLoadedKeys([]);
     setEditing(false);
     setErr(null);
-    reloadTree();
+    // 換 repo:直接抓根層(展開狀態已清空,不能用 reloadTree 的舊 closure)
+    api
+      .tree(repo, '.')
+      .then((r) => setTree(r.items.map(toNode)))
+      .catch((e: Error) => setErr(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo]);
 
@@ -375,6 +408,10 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     repo,
     isMobile,
     tree,
+    expandedKeys,
+    setExpandedKeys,
+    loadedKeys,
+    setLoadedKeys,
     err,
     sel,
     selPath,
@@ -489,6 +526,10 @@ function TreePanel() {
           treeData={c.tree}
           loadData={c.onLoadData}
           onSelect={c.onSelect}
+          expandedKeys={c.expandedKeys}
+          onExpand={(keys) => c.setExpandedKeys(keys)}
+          loadedKeys={c.loadedKeys}
+          onLoad={(keys) => c.setLoadedKeys(keys)}
           blockNode
           titleRender={(node) => {
             const n = node as Node;
