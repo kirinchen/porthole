@@ -112,11 +112,14 @@ export const api = {
     return (await r.json()) as { name: string };
   },
 
-  newSession: async (repo: string, agent = 'claude') => {
+  newSession: async (
+    repo: string,
+    opts: { agent: string; yolo?: boolean; args?: string },
+  ) => {
     const r = await fetch(`/api/${repo}/sessions/new`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent }),
+      body: JSON.stringify(opts),
     });
     if (!r.ok) {
       const b = (await r.json().catch(() => ({}))) as { error?: string };

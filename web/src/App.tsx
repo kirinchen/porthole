@@ -10,7 +10,7 @@
  * active repo = URL path 第一段;tab 進 URL hash。
  */
 import { useEffect, useRef, useState } from 'react';
-import { Layout, Menu, Select, Typography, Spin, Alert, Grid, Dropdown, Button, Space, Modal } from 'antd';
+import { Layout, Menu, Select, Typography, Spin, Alert, Grid, Dropdown, Button, Space } from 'antd';
 import {
   FolderOpenOutlined,
   MessageOutlined,
@@ -20,9 +20,7 @@ import {
   FullscreenOutlined,
   FullscreenExitOutlined,
   MinusOutlined,
-  SettingOutlined,
 } from '@ant-design/icons';
-import { SESSION_AGENTS, getSessionAgent, setSessionAgent } from './lib/settings';
 import Explore, { ExploreProvider, ExploreTree, ExplorePreview } from './tabs/Explore';
 import Chat from './tabs/Chat';
 import Session from './tabs/Session';
@@ -67,8 +65,6 @@ export default function App() {
   const [tab, setTab] = useState<TabKey>(tabFromUrl());
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [agent, setAgent] = useState<string>(getSessionAgent());
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
 
@@ -190,43 +186,8 @@ export default function App() {
         showSearch
         data-loc="app:repo:select"
       />
-      <Button
-        type="text"
-        icon={<SettingOutlined />}
-        onClick={() => setSettingsOpen(true)}
-        style={{ color: '#fff', marginLeft: 8 }}
-        title="設定"
-        data-loc="app:settings"
-      />
       {err && <Alert type="error" message={err} banner style={{ marginLeft: 'auto' }} />}
     </Header>
-  );
-
-  const settingsModal = (
-    <Modal
-      title="設定"
-      open={settingsOpen}
-      onCancel={() => setSettingsOpen(false)}
-      footer={null}
-      data-loc="app:settings:modal"
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span>新 session 使用的 agent</span>
-        <Select
-          value={agent}
-          onChange={(v) => {
-            setAgent(v);
-            setSessionAgent(v);
-          }}
-          options={SESSION_AGENTS.map((a) => ({ value: a, label: a }))}
-          style={{ width: 160 }}
-          data-loc="app:settings:agent"
-        />
-      </div>
-      <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
-        套用於 Session tab 的「新 session」。後端僅允許白名單內的 agent。
-      </Typography.Paragraph>
-    </Modal>
   );
 
   // 右側控制列:Mode 下拉(選 Chat/Session/CLI)+ 撐滿 / 縮小 / 最小化。
@@ -396,7 +357,6 @@ export default function App() {
   return (
     <Layout style={{ height: '100vh' }}>
       {header}
-      {settingsModal}
       <Layout>
         {isMobile ? (
           <>

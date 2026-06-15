@@ -4,11 +4,24 @@
  *  - 右:attach 進對應 tmux session(detach = 切走/關 WS,背景續跑)
  */
 import { useEffect, useState } from 'react';
-import { List, Button, Typography, Alert, Space, Tag, Popconfirm, Popover } from 'antd';
+import {
+  List,
+  Button,
+  Typography,
+  Alert,
+  Space,
+  Tag,
+  Popconfirm,
+  Popover,
+  Modal,
+  AutoComplete,
+  Switch,
+  Input,
+} from 'antd';
 import { UnorderedListOutlined, DesktopOutlined } from '@ant-design/icons';
 import Terminal from '../lib/Terminal';
 import { api, type ClaudeSession } from '../lib/api';
-import { getSessionAgent } from '../lib/settings';
+import { getSessionAgent, setSessionAgent, SESSION_AGENTS } from '../lib/settings';
 
 interface Props {
   repo: string;
@@ -21,6 +34,10 @@ export default function Session({ repo }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false); // 頂部 List 選單(session 列表)
+  const [newOpen, setNewOpen] = useState(false); // 新 session 表單
+  const [agent, setAgent] = useState<string>(getSessionAgent());
+  const [yolo, setYolo] = useState(false);
+  const [args, setArgs] = useState('');
 
   const refresh = () => {
     api
@@ -54,11 +71,14 @@ export default function Session({ repo }: Props) {
     }
   };
 
-  // 開全新背景 session(裸 tmux 跑 claude)→ 開好直接 attach。
-  const newSession = async () => {
+  // 依表單(agent + YOLO + 額外參數)開全新背景 session → 開好直接 attach。
+  const submitNew = async () => {
+    const a = agent.trim() || 'claude';
+    setNewOpen(false);
     setErr(null);
     try {
-      const { name } = await api.newSession(repo, getSessionAgent());
+      const { name } = await api.newSession(repo, { agent: a, yolo, args: args.trim() || undefined });
+      setSessionAgent(a); // 記住上次用的 agent
       setAttached(name);
       setListOpen(false);
       refresh();
@@ -196,8 +216,8 @@ export default function Session({ repo }: Props) {
         </Popover>
         <Button
           icon={<DesktopOutlined />}
-          onClick={() => void newSession()}
-          title="開全新背景 session(claude)並 attach"
+          onClick={() => setNewOpen(true)}
+          title="開全新背景 session(可設 agent / YOLO / 參數)"
           data-loc="session:new"
         >
           新 session
@@ -219,6 +239,47 @@ export default function Session({ repo }: Props) {
           </div>
         )}
       </div>
+
+      <Modal
+        title="新 session"
+        open={newOpen}
+        onOk={() => void submitNew()}
+        onCancel={() => setNewOpen(false)}
+        okText="開始"
+        cancelText="取消"
+        data-loc="session:new:modal"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <div style={{ marginBottom: 4 }}>Agent</div>
+            <AutoComplete
+              value={agent}
+              onChange={setAgent}
+              options={SESSION_AGENTS.map((a) => ({ value: a }))}
+              style={{ width: '100%' }}
+              placeholder="claude / gemini / 自訂指令"
+              data-loc="session:new:agent"
+            />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Switch checked={yolo} onChange={setYolo} data-loc="session:new:yolo" />
+            <span>YOLO 模式</span>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              加 --dangerously-skip-permissions(claude:跳過權限確認)
+            </Typography.Text>
+          </div>
+          <div>
+            <div style={{ marginBottom: 4 }}>額外參數(選填)</div>
+            <Input
+              value={args}
+              onChange={(e) => setArgs(e.target.value)}
+              onPressEnter={() => void submitNew()}
+              placeholder="例如 --model opus"
+              data-loc="session:new:args"
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
