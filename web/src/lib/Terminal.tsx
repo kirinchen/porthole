@@ -7,6 +7,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { wsUrl } from './api';
+import { installOsc52 } from './osc52';
 
 interface Props {
   /** WS path,如 /ws/cli/coral。null = 不連線(顯示空終端)。 */
@@ -36,6 +37,7 @@ export default function Terminal({ path, sessionKey, acceptMention }: Props) {
     term.loadAddon(fit);
     term.open(hostRef.current);
     fit.fit();
+    const osc52 = installOsc52(term); // 遠端 OSC 52 → 本機剪貼簿
 
     const ws = new WebSocket(wsUrl(path));
     const sendResize = () => {
@@ -81,6 +83,7 @@ export default function Terminal({ path, sessionKey, acceptMention }: Props) {
       window.removeEventListener('resize', onResize);
       window.removeEventListener('porthole:mention', onMention);
       ro.disconnect();
+      osc52.dispose();
       ws.close();
       term.dispose();
     };

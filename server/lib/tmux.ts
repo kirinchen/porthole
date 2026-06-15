@@ -126,12 +126,18 @@ export function newTmuxName(repo: string): string {
   return `porthole_${safeRepo}_new${Date.now()}`;
 }
 
-/** 對 session 開 mouse on:讓 xterm 滾輪能進 tmux copy-mode 捲歷史(否則滾輪失效)。 */
+/** 設 session 友善選項:mouse on(滾輪進 copy-mode 捲歷史)+ set-clipboard on
+ *  (tmux 在 yank 時 emit OSC 52,前端 osc52 handler 轉本機剪貼簿)。 */
 export async function enableMouse(name: string): Promise<void> {
   try {
     await pexec('tmux', ['set-option', '-t', name, 'mouse', 'on']);
   } catch {
     /* 開不起來不影響 session 本身 */
+  }
+  try {
+    await pexec('tmux', ['set-option', '-g', 'set-clipboard', 'on']);
+  } catch {
+    /* 同上 */
   }
 }
 
