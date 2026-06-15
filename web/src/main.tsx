@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { ConfigProvider } from 'antd';
 import App from './App';
 import DevPick from './DevPick';
+import ContentPick from './components/ContentPick';
 import './styles.css';
 
 // 部署後 chunk 換新 hash,舊分頁的 lazy import(MarkdownEditor / mermaid 等)會 404。
@@ -20,6 +21,8 @@ createRoot(document.getElementById('root')!).render(
       <App />
       {/* DevPick 掛根層:Ctrl+F12 元素定位器 */}
       <DevPick />
+      {/* ContentPick:挑內容帶進 Chat 對話(由 Chat 的「引用內容」鈕啟動) */}
+      <ContentPick />
     </ConfigProvider>
   </StrictMode>,
 );

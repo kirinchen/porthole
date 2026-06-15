@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { Button, List, Spin, Alert, Typography, Space, Popover } from 'antd';
-import { UnorderedListOutlined } from '@ant-design/icons';
+import { UnorderedListOutlined, HighlightOutlined } from '@ant-design/icons';
 import { api, type ThreadMeta } from '../lib/api';
 import MentionTextArea from '../components/MentionTextArea';
 import Markdown from '../components/Markdown';
@@ -59,6 +59,18 @@ export default function Chat({ repo }: Props) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [turns]);
+
+  // ContentPick 挑到的內容 → 以引用塊附進輸入框(Cursor 式 mention)。
+  useEffect(() => {
+    const onMention = (e: Event) => {
+      const text = (e as CustomEvent<{ text: string }>).detail?.text;
+      if (!text) return;
+      const quoted = '> ' + text.replace(/\n/g, '\n> ');
+      setInput((prev) => (prev ? `${prev.replace(/\s*$/, '')}\n\n${quoted}\n\n` : `${quoted}\n\n`));
+    };
+    window.addEventListener('porthole:mention', onMention);
+    return () => window.removeEventListener('porthole:mention', onMention);
+  }, []);
 
   const send = async () => {
     const prompt = input.trim();
@@ -193,6 +205,16 @@ export default function Chat({ repo }: Props) {
         </div>
 
         <div style={{ borderTop: '1px solid #f0f0f0', padding: 12 }}>
+          <Button
+            size="small"
+            icon={<HighlightOutlined />}
+            onClick={() => window.dispatchEvent(new Event('porthole:pick:start'))}
+            style={{ marginBottom: 8 }}
+            title="挑畫面上的內容帶進對話(Cursor 式引用)"
+            data-loc="chat:pick"
+          >
+            引用內容
+          </Button>
           <Space.Compact style={{ width: '100%' }}>
             <MentionTextArea
               repo={repo}

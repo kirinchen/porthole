@@ -142,6 +142,13 @@ export default function App() {
     }
   }, [tab]);
 
+  // ContentPick 挑到內容 → 切右側面板到 Chat,讓引用進來的內容看得到
+  useEffect(() => {
+    const toChat = () => setTab('chat');
+    window.addEventListener('porthole:mention', toChat);
+    return () => window.removeEventListener('porthole:mention', toChat);
+  }, []);
+
   // 上一頁/下一頁、手改 hash → 同步回 state
   useEffect(() => {
     const sync = () => {
