@@ -39,12 +39,18 @@ export default function Session({ repo }: Props) {
   const [yolo, setYolo] = useState(false);
   const [args, setArgs] = useState('');
 
+  // 只留本 repo 的背景 tmux(/api/tmux 是全域列舉所有 porthole_*,要依本 repo 前綴過濾)。
+  const tmuxPrefix = `porthole_${repo.replace(/[^A-Za-z0-9_]/g, '_')}_`;
+
   const refresh = () => {
     api
       .sessions(repo)
       .then((r) => setSessions(r.sessions))
       .catch((e: Error) => setErr(e.message));
-    api.tmuxList().then((r) => setTmuxNames(r.sessions)).catch(() => undefined);
+    api
+      .tmuxList()
+      .then((r) => setTmuxNames(r.sessions.filter((n) => n.startsWith(tmuxPrefix))))
+      .catch(() => undefined);
   };
 
   useEffect(() => {
