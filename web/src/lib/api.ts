@@ -128,6 +128,14 @@ export const api = {
     return (await r.json()) as { name: string };
   },
 
+  deleteSession: async (repo: string, id: string) => {
+    const r = await fetch(`/api/${repo}/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!r.ok) {
+      const b = (await r.json().catch(() => ({}))) as { error?: string };
+      throw new Error(b.error ?? `HTTP ${r.status}`);
+    }
+  },
+
   tmuxList: () => jget<{ sessions: string[] }>('/api/tmux'),
 
   tmuxKill: async (name: string) => {

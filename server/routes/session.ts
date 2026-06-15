@@ -11,6 +11,7 @@ import type { WebSocket } from 'ws';
 import { guard } from '../lib/path-guard.ts';
 import {
   listClaudeSessions,
+  deleteClaudeSession,
   ensureTmux,
   listTmux,
   killTmux,
@@ -59,6 +60,16 @@ export default async function sessionRoutes(app: FastifyInstance) {
       const name = newTmuxName(req.params.repo);
       await startFreshTmux(name, root, command);
       return { name };
+    },
+  );
+
+  // 刪除某 claude session(刪其 jsonl 記錄)。
+  app.delete<{ Params: { repo: string; id: string } }>(
+    '/api/:repo/sessions/:id',
+    async (req) => {
+      const root = guard.repoRoot(req.params.repo);
+      await deleteClaudeSession(root, req.params.id);
+      return { ok: true };
     },
   );
 

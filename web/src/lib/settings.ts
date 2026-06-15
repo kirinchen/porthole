@@ -21,3 +21,26 @@ export function setSessionAgent(agent: string): void {
     /* localStorage 不可用 → 略過 */
   }
 }
+
+// 背景 tmux session 的別名(只改顯示,不動實際 tmux 名)。
+const ALIAS_KEY = 'porthole.sessionAlias';
+
+export function getAliases(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(ALIAS_KEY) || '{}') as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+export function setAlias(name: string, alias: string): void {
+  const m = getAliases();
+  const a = alias.trim();
+  if (a) m[name] = a;
+  else delete m[name];
+  try {
+    localStorage.setItem(ALIAS_KEY, JSON.stringify(m));
+  } catch {
+    /* 略過 */
+  }
+}

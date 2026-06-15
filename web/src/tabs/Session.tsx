@@ -18,10 +18,16 @@ import {
   Switch,
   Input,
 } from 'antd';
-import { UnorderedListOutlined, DesktopOutlined } from '@ant-design/icons';
+import { UnorderedListOutlined, DesktopOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import Terminal from '../lib/Terminal';
 import { api, type ClaudeSession } from '../lib/api';
-import { getSessionAgent, setSessionAgent, SESSION_AGENTS } from '../lib/settings';
+import {
+  getSessionAgent,
+  setSessionAgent,
+  SESSION_AGENTS,
+  getAliases,
+  setAlias,
+} from '../lib/settings';
 
 interface Props {
   repo: string;
@@ -38,6 +44,23 @@ export default function Session({ repo }: Props) {
   const [agent, setAgent] = useState<string>(getSessionAgent());
   const [yolo, setYolo] = useState(false);
   const [args, setArgs] = useState('');
+  const [aliasMap, setAliasMap] = useState<Record<string, string>>(getAliases());
+  const [aliasOpen, setAliasOpen] = useState(false);
+  const [aliasTarget, setAliasTarget] = useState('');
+  const [aliasInput, setAliasInput] = useState('');
+
+  const label = (name: string) => aliasMap[name] || name; // 有別名顯示別名
+
+  const openAlias = (name: string) => {
+    setAliasTarget(name);
+    setAliasInput(aliasMap[name] || '');
+    setAliasOpen(true);
+  };
+  const saveAlias = () => {
+    setAlias(aliasTarget, aliasInput);
+    setAliasMap(getAliases());
+    setAliasOpen(false);
+  };
 
   // 只留本 repo 的背景 tmux(/api/tmux 是全域列舉所有 porthole_*,要依本 repo 前綴過濾)。
   const tmuxPrefix = `porthole_${repo.replace(/[^A-Za-z0-9_]/g, '_')}_`;
@@ -93,6 +116,19 @@ export default function Session({ repo }: Props) {
     }
   };
 
+  // 刪除某 claude session(刪 jsonl;若有對應 live tmux 先收掉)。
+  const removeSession = async (id: string, tname: string, live: boolean) => {
+    setErr(null);
+    try {
+      if (live) await api.tmuxKill(tname);
+      await api.deleteSession(repo, id);
+      if (attached === tname) setAttached(null);
+      refresh();
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+
   const kill = async (name: string) => {
     try {
       await api.tmuxKill(name);
@@ -117,7 +153,7 @@ export default function Session({ repo }: Props) {
             renderItem={(name) => (
               <List.Item style={{ display: 'block' }}>
                 <Typography.Text ellipsis style={{ fontSize: 12, display: 'block' }} title={name}>
-                  {name}
+                  {label(name)}
                 </Typography.Text>
                 <div style={{ marginTop: 4 }}>
                   <Space>
@@ -131,6 +167,12 @@ export default function Session({ repo }: Props) {
                     >
                       attach
                     </Button>
+                    <Button
+                      size="small"
+                      icon={<EditOutlined />}
+                      onClick={() => openAlias(name)}
+                      title="別名"
+                    />
                     <Popconfirm title="收掉這個 tmux session?" onConfirm={() => void kill(name)}>
                       <Button size="small" danger>
                         收掉
@@ -183,6 +225,15 @@ export default function Session({ repo }: Props) {
                       </Button>
                     </Popconfirm>
                   )}
+                  <Popconfirm
+                    title="刪除這個 session?(連同 jsonl 記錄)"
+                    okText="刪除"
+                    cancelText="取消"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => void removeSession(s.id, tname, live)}
+                  >
+                    <Button size="small" danger icon={<DeleteOutlined />} title="刪除 session" />
+                  </Popconfirm>
                 </Space>
               </div>
             </List.Item>
@@ -230,9 +281,19 @@ export default function Session({ repo }: Props) {
         </Button>
         {tmuxNames.length > 0 && <Tag color="green">{tmuxNames.length} 個背景 tmux</Tag>}
         {attached && (
-          <Typography.Text type="secondary" ellipsis style={{ flex: 1, minWidth: 0 }}>
-            {attached}
-          </Typography.Text>
+          <>
+            <Typography.Text type="secondary" ellipsis style={{ flex: 1, minWidth: 0 }} title={attached}>
+              {label(attached)}
+            </Typography.Text>
+            <Button
+              size="small"
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => openAlias(attached)}
+              title="設別名"
+              data-loc="session:alias"
+            />
+          </>
         )}
       </div>
 
@@ -285,6 +346,27 @@ export default function Session({ repo }: Props) {
             />
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        title="session 別名"
+        open={aliasOpen}
+        onOk={saveAlias}
+        onCancel={() => setAliasOpen(false)}
+        okText="儲存"
+        cancelText="取消"
+        data-loc="session:alias:modal"
+      >
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+          只改顯示名稱({aliasTarget}),清空則還原。
+        </Typography.Paragraph>
+        <Input
+          value={aliasInput}
+          onChange={(e) => setAliasInput(e.target.value)}
+          onPressEnter={saveAlias}
+          placeholder="好記的別名,例如:重構分支"
+          data-loc="session:alias:input"
+        />
       </Modal>
     </div>
   );

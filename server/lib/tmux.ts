@@ -65,6 +65,16 @@ export async function listClaudeSessions(repoRoot: string): Promise<ClaudeSessio
   return out;
 }
 
+/** 刪除某 claude session 的 jsonl 記錄(~/.claude/projects/<encoded>/<id>.jsonl)。
+ *  id 嚴格驗證(僅 [A-Za-z0-9_-],無 . / →無路徑穿越)。 */
+export async function deleteClaudeSession(repoRoot: string, id: string): Promise<void> {
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+    throw Object.assign(new Error('invalid session id'), { statusCode: 400 });
+  }
+  const dir = path.join(os.homedir(), '.claude', 'projects', encodeProjectDir(repoRoot));
+  await fs.rm(path.join(dir, `${id}.jsonl`), { force: false });
+}
+
 /** 讀 jsonl 找第一則 user 文字訊息(截斷 80 字)當標題。 */
 async function firstUserText(file: string): Promise<string> {
   const raw = await fs.readFile(file, 'utf8');
