@@ -19,6 +19,7 @@ import {
   tmuxExists,
   newTmuxName,
   startFreshTmux,
+  enableMouse,
 } from '../lib/tmux.ts';
 import { bridgePty } from '../lib/pty-bridge.ts';
 import { isSameOriginWs } from '../lib/ws-origin.ts';
@@ -113,6 +114,7 @@ export default async function sessionRoutes(app: FastifyInstance) {
         socket.close();
         return;
       }
+      await enableMouse(name); // 既有 session 也開 mouse,滾輪才能捲歷史
       // attach 進既有 tmux session;WS 關閉 → tmux client 退出 = detach,session 續跑。
       bridgePty(socket, { file: 'tmux', args: ['attach', '-t', name], cwd: guard.base });
     },

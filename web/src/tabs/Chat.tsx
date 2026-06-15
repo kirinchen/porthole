@@ -195,8 +195,8 @@ export default function Chat({ repo, isActive }: Props) {
         </Typography.Text>
       </div>
 
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ flex: 1, overflow: 'auto', padding: 16 }} data-loc="chat:messages">
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16 }} data-loc="chat:messages">
           {err && <Alert type="error" message={err} style={{ marginBottom: 8 }} />}
           {turns.length === 0 && (
             <Typography.Text type="secondary">

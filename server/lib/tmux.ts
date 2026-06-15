@@ -126,10 +126,20 @@ export function newTmuxName(repo: string): string {
   return `porthole_${safeRepo}_new${Date.now()}`;
 }
 
+/** 對 session 開 mouse on:讓 xterm 滾輪能進 tmux copy-mode 捲歷史(否則滾輪失效)。 */
+export async function enableMouse(name: string): Promise<void> {
+  try {
+    await pexec('tmux', ['set-option', '-t', name, 'mouse', 'on']);
+  } catch {
+    /* 開不起來不影響 session 本身 */
+  }
+}
+
 /** 開全新背景 tmux 跑指定指令(command 為已拆好的 argv,如 ['claude','--model','x'])。
  *  走 execFile argv、不經 shell(故無 shell 注入);與 CLI 同屬信任網路下的 RCE 面。 */
 export async function startFreshTmux(name: string, cwd: string, command: string[]): Promise<void> {
   await pexec('tmux', ['new-session', '-d', '-s', name, '-c', cwd, ...command]);
+  await enableMouse(name);
 }
 
 /** 確保背景 tmux session 存在;不存在則建立並在內跑 `claude --resume <id> [extra…]`。
@@ -153,6 +163,7 @@ export async function ensureTmux(
     claudeSessionId,
     ...extra,
   ]);
+  await enableMouse(name);
 }
 
 /** 列出 porthole 開的 tmux session 名稱。 */
