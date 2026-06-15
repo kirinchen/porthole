@@ -132,10 +132,15 @@ export async function startFreshTmux(name: string, cwd: string, command: string[
   await pexec('tmux', ['new-session', '-d', '-s', name, '-c', cwd, ...command]);
 }
 
-/** 確保背景 tmux session 存在;不存在則建立並在內跑 `claude --resume <id>`。 */
-export async function ensureTmux(name: string, cwd: string, claudeSessionId: string): Promise<void> {
+/** 確保背景 tmux session 存在;不存在則建立並在內跑 `claude --resume <id> [extra…]`。
+ *  已存在則直接 return(不會用新參數重建 → 接既有 session)。extra 走 argv,不經 shell。 */
+export async function ensureTmux(
+  name: string,
+  cwd: string,
+  claudeSessionId: string,
+  extra: string[] = [],
+): Promise<void> {
   if (await tmuxExists(name)) return;
-  // command 走 argv;claude --resume <id> 在 repo cwd 內背景續跑。
   await pexec('tmux', [
     'new-session',
     '-d',
@@ -146,6 +151,7 @@ export async function ensureTmux(name: string, cwd: string, claudeSessionId: str
     'claude',
     '--resume',
     claudeSessionId,
+    ...extra,
   ]);
 }
 

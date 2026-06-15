@@ -104,9 +104,15 @@ export const api = {
 
   sessions: (repo: string) => jget<{ sessions: ClaudeSession[] }>(`/api/${repo}/sessions`),
 
-  startSession: async (repo: string, id: string) => {
+  startSession: async (
+    repo: string,
+    id: string,
+    opts?: { yolo?: boolean; args?: string },
+  ) => {
     const r = await fetch(`/api/${repo}/sessions/${encodeURIComponent(id)}/start`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts ?? {}),
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return (await r.json()) as { name: string };

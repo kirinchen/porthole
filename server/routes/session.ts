@@ -36,12 +36,16 @@ export default async function sessionRoutes(app: FastifyInstance) {
     return { sessions };
   });
 
-  app.post<{ Params: { repo: string; id: string } }>(
+  app.post<{ Params: { repo: string; id: string }; Body: { yolo?: boolean; args?: string } }>(
     '/api/:repo/sessions/:id/start',
     async (req) => {
       const root = guard.repoRoot(req.params.repo);
       const name = tmuxName(req.params.repo, req.params.id);
-      await ensureTmux(name, root, req.params.id);
+      const extra: string[] = [];
+      if (req.body?.yolo) extra.push('--dangerously-skip-permissions');
+      const a = String(req.body?.args ?? '').trim();
+      if (a) extra.push(...a.split(/\s+/));
+      await ensureTmux(name, root, req.params.id, extra);
       return { name };
     },
   );
