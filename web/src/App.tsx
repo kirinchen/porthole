@@ -142,13 +142,6 @@ export default function App() {
     }
   }, [tab]);
 
-  // ContentPick 挑到內容 → 切右側面板到 Chat,讓引用進來的內容看得到
-  useEffect(() => {
-    const toChat = () => setTab('chat');
-    window.addEventListener('porthole:mention', toChat);
-    return () => window.removeEventListener('porthole:mention', toChat);
-  }, []);
-
   // 上一頁/下一頁、手改 hash → 同步回 state
   useEffect(() => {
     const sync = () => {
@@ -259,8 +252,8 @@ export default function App() {
                 style={{ position: 'absolute', inset: 0, display: rightSel === t.key ? 'block' : 'none' }}
                 data-loc={`app:right:${t.key}`}
               >
-                {t.key === 'chat' && <Chat repo={repo} />}
-                {t.key === 'session' && <Session repo={repo} />}
+                {t.key === 'chat' && <Chat repo={repo} isActive={rightSel === 'chat'} />}
+                {t.key === 'session' && <Session repo={repo} active={rightSel === 'session'} />}
                 {t.key === 'cli' && <Cli repo={repo} />}
               </div>
             ),
@@ -354,9 +347,9 @@ export default function App() {
   ) : tab === 'explore' ? (
     <Explore repo={repo} />
   ) : tab === 'chat' ? (
-    <Chat repo={repo} />
+    <Chat repo={repo} isActive />
   ) : tab === 'session' ? (
-    <Session repo={repo} />
+    <Session repo={repo} active />
   ) : (
     <Cli repo={repo} />
   );

@@ -18,7 +18,13 @@ import {
   Switch,
   Input,
 } from 'antd';
-import { UnorderedListOutlined, DesktopOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import {
+  UnorderedListOutlined,
+  DesktopOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  HighlightOutlined,
+} from '@ant-design/icons';
 import Terminal from '../lib/Terminal';
 import { api, type ClaudeSession } from '../lib/api';
 import {
@@ -31,9 +37,10 @@ import {
 
 interface Props {
   repo: string;
+  active?: boolean; // 目前 active 的右側面板時,終端接收 ContentPick 引用
 }
 
-export default function Session({ repo }: Props) {
+export default function Session({ repo, active }: Props) {
   const [sessions, setSessions] = useState<ClaudeSession[]>([]);
   const [tmuxNames, setTmuxNames] = useState<string[]>([]);
   const [attached, setAttached] = useState<string | null>(null);
@@ -308,6 +315,14 @@ export default function Session({ repo }: Props) {
         >
           新 session
         </Button>
+        <Button
+          icon={<HighlightOutlined />}
+          onClick={() => window.dispatchEvent(new Event('porthole:pick:start'))}
+          title="挑畫面內容貼進此終端(Cursor 式引用)"
+          data-loc="session:pick"
+        >
+          引用內容
+        </Button>
         {tmuxNames.length > 0 && <Tag color="green">{tmuxNames.length} 個背景 tmux</Tag>}
         {attached && (
           <>
@@ -328,7 +343,7 @@ export default function Session({ repo }: Props) {
 
       <div style={{ flex: 1, background: '#1e1e1e', padding: 8, minHeight: 0 }} data-loc="session:term">
         {attached ? (
-          <Terminal path={`/ws/tmux/${attached}`} sessionKey={attached} />
+          <Terminal path={`/ws/tmux/${attached}`} sessionKey={attached} acceptMention={active} />
         ) : (
           <div style={{ color: '#888', padding: 16, fontFamily: 'monospace' }}>
             開「List」選一個 session「開背景並 attach」。detach 只要切走或關閉,tmux 會在背景續跑。

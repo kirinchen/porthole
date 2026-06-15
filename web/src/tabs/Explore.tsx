@@ -49,6 +49,7 @@ import {
 } from '@ant-design/icons';
 import { api } from '../lib/api';
 import Markdown from '../components/Markdown';
+import { setCurrentFile } from '../lib/currentFile';
 
 // CM6 編輯器較重 → lazy load(守「薄」)。mermaid/FlowEditor 在 MermaidBlock 內按需載入。
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor'));
@@ -221,6 +222,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setTree([]);
     setSel(null);
     setSelPath(null);
+    setCurrentFile(null);
     setBaseDir('');
     setExpandedKeys([]);
     setLoadedKeys([]);
@@ -255,6 +257,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     try {
       const f = await api.file(repo, n.path);
       setSel({ path: n.path, content: f.content, markdown: f.markdown });
+      setCurrentFile({ path: n.path, content: f.content }); // 供 ContentPick 推算行號
       setDrawerOpen(false); // 手機:選檔後關抽屜露出預覽
     } catch (e) {
       setErr((e as Error).message);
@@ -622,6 +625,7 @@ export function ExplorePreview() {
     <div
       style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
       data-loc="explore:preview"
+      data-file={c.sel?.path || undefined}
     >
       {(c.isMobile || c.sel || c.selPath) && (
         <div

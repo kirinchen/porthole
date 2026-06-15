@@ -13,6 +13,7 @@ import Markdown from '../components/Markdown';
 
 interface Props {
   repo: string;
+  isActive?: boolean; // 是否為目前 active 的右側面板(只有 active 才接收 ContentPick 引用)
 }
 
 interface Turn {
@@ -20,7 +21,7 @@ interface Turn {
   text: string;
 }
 
-export default function Chat({ repo }: Props) {
+export default function Chat({ repo, isActive }: Props) {
   const [threads, setThreads] = useState<ThreadMeta[]>([]);
   const [active, setActive] = useState<string>('default');
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -29,6 +30,10 @@ export default function Chat({ repo }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false); // 頂部 List 選單(thread 列表)
   const bottomRef = useRef<HTMLDivElement>(null);
+  const activeRef = useRef(true);
+  useEffect(() => {
+    activeRef.current = isActive !== false;
+  }, [isActive]);
 
   const loadThreads = () => {
     api
@@ -60,12 +65,17 @@ export default function Chat({ repo }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [turns]);
 
-  // ContentPick 挑到的內容 → 以引用塊附進輸入框(Cursor 式 mention)。
+  // ContentPick 挑到的內容 → 以引用塊附進輸入框(Cursor 式 mention)。只有 active 時收。
   useEffect(() => {
     const onMention = (e: Event) => {
-      const text = (e as CustomEvent<{ text: string }>).detail?.text;
+      if (!activeRef.current) return;
+      const { text, source } = (e as CustomEvent<{ text: string; source?: string }>).detail || {};
       if (!text) return;
-      const quoted = '> ' + text.replace(/\n/g, '\n> ');
+      const body = (source ? `[${source}]\n` : '') + text;
+      const quoted = body
+        .split('\n')
+        .map((l) => '> ' + l)
+        .join('\n');
       setInput((prev) => (prev ? `${prev.replace(/\s*$/, '')}\n\n${quoted}\n\n` : `${quoted}\n\n`));
     };
     window.addEventListener('porthole:mention', onMention);

@@ -9,8 +9,25 @@
  *  - Esc 退出。不經剪貼簿(http 區網下 navigator.clipboard 不可用)。
  */
 import { useEffect, useRef, useState } from 'react';
+import { getCurrentFile } from '../lib/currentFile';
 
 const HILITE = 'porthole-pick-hilite';
+
+/** 推算來源 `path:line`:挑到的元素在某 data-file 容器內 → path;
+ *  再以挑到文字的首行在原始內容中找出行號。找不到行號就只給 path。 */
+function sourceOf(el: Element, text: string): string {
+  const path = el.closest('[data-file]')?.getAttribute('data-file') || '';
+  if (!path) return '';
+  const cf = getCurrentFile();
+  if (cf && cf.path === path) {
+    const firstLine = (text.split('\n').find((l) => l.trim()) || '').trim();
+    if (firstLine) {
+      const idx = cf.content.split('\n').findIndex((l) => l.includes(firstLine));
+      if (idx >= 0) return `${path}:${idx + 1}`;
+    }
+  }
+  return path;
+}
 
 /** 取元素可讀文字:收斂空白、去多餘空行、上限 4000 字。 */
 function readContent(el: Element): string {
@@ -64,8 +81,9 @@ export default function ContentPick() {
       if (!el) return;
       const text = readContent(el);
       if (!text) return;
-      window.dispatchEvent(new CustomEvent('porthole:mention', { detail: { text } }));
-      setToast(text.slice(0, 80));
+      const source = sourceOf(el, text);
+      window.dispatchEvent(new CustomEvent('porthole:mention', { detail: { text, source } }));
+      setToast((source ? `[${source}] ` : '') + text.slice(0, 60));
       window.setTimeout(() => setToast(null), 3000);
     };
 
@@ -122,7 +140,7 @@ export default function ContentPick() {
             wordBreak: 'break-word',
           }}
         >
-          已帶入對話:{toast}
+          已帶入引用:{toast}
         </div>
       )}
     </>

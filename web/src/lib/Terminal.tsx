@@ -13,10 +13,16 @@ interface Props {
   path: string | null;
   /** path 變動時用來強制重建。 */
   sessionKey?: string;
+  /** true 時接收 ContentPick 的 `porthole:mention`,以 bracketed paste 貼進終端。 */
+  acceptMention?: boolean;
 }
 
-export default function Terminal({ path, sessionKey }: Props) {
+export default function Terminal({ path, sessionKey, acceptMention }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const acceptRef = useRef(false);
+  useEffect(() => {
+    acceptRef.current = !!acceptMention;
+  }, [acceptMention]);
 
   useEffect(() => {
     if (!path || !hostRef.current) return;
@@ -47,6 +53,16 @@ export default function Terminal({ path, sessionKey }: Props) {
     });
 
     let raf = 0;
+    // ContentPick 引用 → 以 bracketed paste 貼進(不自動送出,讓使用者檢視/編輯後再送)。
+    const onMention = (e: Event) => {
+      if (!acceptRef.current || ws.readyState !== ws.OPEN) return;
+      const { text, source } = (e as CustomEvent<{ text: string; source?: string }>).detail || {};
+      if (!text) return;
+      const payload = (source ? `[${source}]\n` : '') + text;
+      ws.send(JSON.stringify({ type: 'data', data: `\x1b[200~${payload}\x1b[201~` }));
+    };
+    window.addEventListener('porthole:mention', onMention);
+
     const onResize = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
@@ -63,6 +79,7 @@ export default function Terminal({ path, sessionKey }: Props) {
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('porthole:mention', onMention);
       ro.disconnect();
       ws.close();
       term.dispose();
