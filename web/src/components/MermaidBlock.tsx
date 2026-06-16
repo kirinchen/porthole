@@ -11,8 +11,12 @@ import { Segmented, Input, Button, Space, Spin, Switch } from 'antd';
 import { FullscreenOutlined } from '@ant-design/icons';
 import type { SegmentedValue } from 'antd/es/segmented';
 import { isFlowchart } from '../lib/mermaidFlow';
+import { isStateDiagram } from '../lib/mermaidState';
+import { isErd } from '../lib/mermaidErd';
 
 const FlowEditor = lazy(() => import('./FlowEditor'));
+const StateEditor = lazy(() => import('./StateEditor'));
+const ErdEditor = lazy(() => import('./ErdEditor'));
 
 type Mode = 'preview' | 'edit' | 'gui';
 
@@ -49,7 +53,14 @@ export default function MermaidBlock({ code, onApply }: Props) {
   const [guiFull, setGuiFull] = useState(false); // GUI 全螢幕(滿版覆蓋視窗)
 
   const editable = !!onApply;
-  const flow = isFlowchart(code);
+  // GUI 可編輯的圖型(互斥,依標頭判定)
+  const guiKind: 'flow' | 'state' | 'erd' | null = isFlowchart(code)
+    ? 'flow'
+    : isStateDiagram(code)
+      ? 'state'
+      : isErd(code)
+        ? 'erd'
+        : null;
 
   useEffect(() => {
     if (mode !== 'preview') return;
@@ -72,10 +83,11 @@ export default function MermaidBlock({ code, onApply }: Props) {
 
   const opts = [{ label: '預覽', value: 'preview' }];
   if (editable) opts.push({ label: '編輯', value: 'edit' });
-  if (editable && flow) opts.push({ label: 'GUI', value: 'gui' });
+  if (editable && guiKind) opts.push({ label: 'GUI', value: 'gui' });
 
   const onTab = (v: SegmentedValue) => {
     const m = v as Mode;
+    if (m === 'gui' && !guiKind) return; // 無對應 GUI 編輯器時不進 gui(防呆)
     if (m === 'edit') setDraft(code); // 進編輯時以目前內容為準
     if (m !== 'gui') setGuiFull(false); // 離開 GUI → 取消全螢幕
     setMode(m);
@@ -160,9 +172,11 @@ export default function MermaidBlock({ code, onApply }: Props) {
 
       {mode === 'gui' &&
         (() => {
+          const EditorComp =
+            guiKind === 'state' ? StateEditor : guiKind === 'erd' ? ErdEditor : FlowEditor;
           const editor = (
             <Suspense fallback={<Spin />}>
-              <FlowEditor
+              <EditorComp
                 code={code}
                 fill={guiFull}
                 onSave={(c) => {
