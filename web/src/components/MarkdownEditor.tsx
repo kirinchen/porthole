@@ -138,16 +138,51 @@ const mermaidField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
-/** 空白行右鍵插入的範例 flowchart(刻意用矩形節點子集,GUI tab 可直接解析)。 */
-const SAMPLE_FLOW = [
-  '```mermaid',
-  'graph TD;',
-  '    A[開始] --> B[處理];',
-  '    A --> C[檢查];',
-  '    B --> D[完成];',
-  '    C --> D;',
-  '```',
-].join('\n');
+const fence = (lines: string[]) => ['```mermaid', ...lines, '```'].join('\n');
+
+/** 空白行右鍵可插入的範例(皆為各圖型的 GUI 可編輯子集)。 */
+const GUI_SAMPLES: { label: string; code: string }[] = [
+  {
+    label: '＋ Flowchart',
+    code: fence(['graph TD;', '    A[開始] --> B[處理];', '    A --> C[檢查];', '    B --> D[完成];', '    C --> D;']),
+  },
+  {
+    label: '＋ State diagram',
+    code: fence(['stateDiagram-v2', '    direction LR', '    [*] --> Idle', '    Idle --> Running : start', '    Running --> [*]']),
+  },
+  {
+    label: '＋ ERD',
+    code: fence([
+      'erDiagram',
+      '    CUSTOMER {',
+      '        string name',
+      '        string email PK',
+      '    }',
+      '    ORDER {',
+      '        int id PK',
+      '    }',
+      '    CUSTOMER ||--o{ ORDER : places',
+    ]),
+  },
+  {
+    label: '＋ Class diagram',
+    code: fence([
+      'classDiagram',
+      '    class Animal {',
+      '        +int age',
+      '        +eat() void',
+      '    }',
+      '    class Dog {',
+      '        +bark() void',
+      '    }',
+      '    Animal <|-- Dog',
+    ]),
+  },
+  {
+    label: '＋ Sequence diagram',
+    code: fence(['sequenceDiagram', '    participant A as Alice', '    participant B as Bob', '    A->>B: Hello', '    B-->>A: Hi']),
+  },
+];
 
 // 空白行右鍵選單(純 DOM,輕量;不引 Antd 進 CM6 widget 樹)。
 let flowMenu: HTMLDivElement | null = null;
@@ -165,7 +200,7 @@ function onDocMouseDown(e: MouseEvent) {
 function onDocKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape') closeFlowMenu();
 }
-function showFlowMenu(x: number, y: number, onPick: () => void) {
+function showFlowMenu(x: number, y: number, onPick: (code: string) => void) {
   closeFlowMenu();
   const menu = document.createElement('div');
   menu.setAttribute('data-loc', 'explore:edit:flowmenu');
@@ -173,25 +208,31 @@ function showFlowMenu(x: number, y: number, onPick: () => void) {
     'position:fixed;z-index:1500;background:#fff;border:1px solid #d9d9d9;border-radius:6px;' +
     'box-shadow:0 2px 8px rgba(0,0,0,.15);padding:4px;font-size:13px;' +
     `left:${x}px;top:${y}px;`;
-  const item = document.createElement('div');
-  item.textContent = '＋ new flow chart';
-  item.style.cssText = 'padding:6px 12px;cursor:pointer;border-radius:4px;white-space:nowrap;';
-  item.onmouseenter = () => (item.style.background = '#f0f0f0');
-  item.onmouseleave = () => (item.style.background = '');
-  // 用 mousedown(早於 outside-close 的 click),preventDefault 不讓編輯器失焦。
-  item.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    onPick();
-    closeFlowMenu();
-  });
-  menu.appendChild(item);
+  const head = document.createElement('div');
+  head.textContent = '插入圖表(GUI 可編輯)';
+  head.style.cssText = 'padding:4px 12px;color:#999;font-size:11px;';
+  menu.appendChild(head);
+  for (const s of GUI_SAMPLES) {
+    const item = document.createElement('div');
+    item.textContent = s.label;
+    item.style.cssText = 'padding:6px 12px;cursor:pointer;border-radius:4px;white-space:nowrap;';
+    item.onmouseenter = () => (item.style.background = '#f0f0f0');
+    item.onmouseleave = () => (item.style.background = '');
+    // 用 mousedown(早於 outside-close 的 click),preventDefault 不讓編輯器失焦。
+    item.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      onPick(s.code);
+      closeFlowMenu();
+    });
+    menu.appendChild(item);
+  }
   document.body.appendChild(menu);
   flowMenu = menu;
   document.addEventListener('mousedown', onDocMouseDown);
   document.addEventListener('keydown', onDocKeyDown);
 }
 
-/** 空白行右鍵 → 選單;點 new flow chart → 用範例取代該空白行。 */
+/** 空白行右鍵 → 選單(列出各 GUI 圖型);點選 → 用該範例取代該空白行。 */
 const flowContextMenu = EditorView.domEventHandlers({
   contextmenu(event, view) {
     const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
@@ -199,10 +240,10 @@ const flowContextMenu = EditorView.domEventHandlers({
     const line = view.state.doc.lineAt(pos);
     if (line.text.trim() !== '') return false; // 非空白行 → 用瀏覽器原生選單
     event.preventDefault();
-    showFlowMenu(event.clientX, event.clientY, () => {
+    showFlowMenu(event.clientX, event.clientY, (code) => {
       view.dispatch({
-        changes: { from: line.from, to: line.to, insert: SAMPLE_FLOW },
-        selection: { anchor: line.from + SAMPLE_FLOW.length },
+        changes: { from: line.from, to: line.to, insert: code },
+        selection: { anchor: line.from + code.length },
       });
       view.focus();
     });

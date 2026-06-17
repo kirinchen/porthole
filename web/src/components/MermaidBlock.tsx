@@ -13,10 +13,14 @@ import type { SegmentedValue } from 'antd/es/segmented';
 import { isFlowchart } from '../lib/mermaidFlow';
 import { isStateDiagram } from '../lib/mermaidState';
 import { isErd } from '../lib/mermaidErd';
+import { isClassDiagram } from '../lib/mermaidClass';
+import { isSequence } from '../lib/mermaidSequence';
 
 const FlowEditor = lazy(() => import('./FlowEditor'));
 const StateEditor = lazy(() => import('./StateEditor'));
 const ErdEditor = lazy(() => import('./ErdEditor'));
+const ClassEditor = lazy(() => import('./ClassEditor'));
+const SequenceEditor = lazy(() => import('./SequenceEditor'));
 
 type Mode = 'preview' | 'edit' | 'gui';
 
@@ -54,13 +58,17 @@ export default function MermaidBlock({ code, onApply }: Props) {
 
   const editable = !!onApply;
   // GUI 可編輯的圖型(互斥,依標頭判定)
-  const guiKind: 'flow' | 'state' | 'erd' | null = isFlowchart(code)
+  const guiKind: 'flow' | 'state' | 'erd' | 'class' | 'sequence' | null = isFlowchart(code)
     ? 'flow'
     : isStateDiagram(code)
       ? 'state'
       : isErd(code)
         ? 'erd'
-        : null;
+        : isClassDiagram(code)
+          ? 'class'
+          : isSequence(code)
+            ? 'sequence'
+            : null;
 
   useEffect(() => {
     if (mode !== 'preview') return;
@@ -173,7 +181,15 @@ export default function MermaidBlock({ code, onApply }: Props) {
       {mode === 'gui' &&
         (() => {
           const EditorComp =
-            guiKind === 'state' ? StateEditor : guiKind === 'erd' ? ErdEditor : FlowEditor;
+            guiKind === 'state'
+              ? StateEditor
+              : guiKind === 'erd'
+                ? ErdEditor
+                : guiKind === 'class'
+                  ? ClassEditor
+                  : guiKind === 'sequence'
+                    ? SequenceEditor
+                    : FlowEditor;
           const editor = (
             <Suspense fallback={<Spin />}>
               <EditorComp
