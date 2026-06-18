@@ -24,6 +24,26 @@
 
 ---
 
+## mermaid 圖表 GUI 編輯
+
+編輯 Markdown 時,每個 ```mermaid 區塊都有 **GUI** tab,可圖形化編輯後正規化寫回(空白行右鍵也能一鍵插入各圖型範例)。節點圖型用 React Flow + dagre 自動排版,共用雙擊改字 / 拖把手連線 / Delete 刪 / 復原重做 / 複製貼上 / 全螢幕;sequence 則是清單式表單。支援 5 種圖型:
+
+| Flowchart | State diagram |
+|---|---|
+| ![flowchart](assets/screenshots/gui-flowchart.png) | ![state](assets/screenshots/gui-state.png) |
+
+| ERD | Class diagram |
+|---|---|
+| ![erd](assets/screenshots/gui-erd.png) | ![class](assets/screenshots/gui-class.png) |
+
+| Sequence diagram(清單式) |
+|---|
+| ![sequence](assets/screenshots/gui-sequence.png) |
+
+各圖型僅支援其常用子集(subgraph / composite state / loop/alt 等退回純文字編輯)。
+
+---
+
 ## 安全模型(請先讀)
 
 porthole 預設只給**單機自用 + 信任網路**。請務必理解:
