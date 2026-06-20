@@ -44,7 +44,19 @@ await app.register(cliRoutes);
 
 // prod:serve 前端 build + SPA fallback。dev 時 web/dist 不存在 → 略過,前端走 vite。
 if (fs.existsSync(WEB_DIST)) {
-  await app.register(fastifyStatic, { root: WEB_DIST });
+  await app.register(fastifyStatic, {
+    root: WEB_DIST,
+    cacheControl: false, // 關掉內建 Cache-Control,改由下方 setHeaders 完全掌控
+    // hashed assets(/assets/*)永久快取(immutable);index.html 等不快取,
+    // 部署後一般重整就會拿到最新 chunk 參照 → 避免舊分頁踩失效 chunk。
+    setHeaders: (res, filePath) => {
+      if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+      } else {
+        res.setHeader('cache-control', 'no-cache');
+      }
+    },
+  });
   app.setNotFoundHandler((req, reply) => {
     // API/WS 走原本 404;其餘(SPA route 如 /coral)回 index.html
     if (req.raw.url?.startsWith('/api') || req.raw.url?.startsWith('/ws')) {
