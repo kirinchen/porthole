@@ -185,6 +185,7 @@ function JunctionNode() {
 function GroupNode({ data, selected }: NodeProps) {
   const d = data as { title?: string; icon?: string; nid?: string };
   const emoji = iconEmoji(d.icon);
+  const sides: Side[] = ['L', 'R', 'T', 'B'];
   return (
     <div
       style={{
@@ -212,6 +213,24 @@ function GroupNode({ data, selected }: NodeProps) {
         {emoji ? `${emoji} ` : ''}
         {d.title || d.nid}
       </div>
+      {/* 四邊接點:拖到/拖出 group 會自動錨到組內 service(空組自動補一個)並加 {group}。
+          藍色、稍大、zIndex 高於子節點,確保在邊框上仍可被抓到。 */}
+      {sides.map((s) => (
+        <span key={s}>
+          <Handle
+            id={`t-${s}`}
+            type="target"
+            position={sidePos(s)}
+            style={{ background: '#1677ff', width: 10, height: 10, zIndex: 10 }}
+          />
+          <Handle
+            id={`s-${s}`}
+            type="source"
+            position={sidePos(s)}
+            style={{ background: '#1677ff', width: 10, height: 10, zIndex: 10 }}
+          />
+        </span>
+      ))}
     </div>
   );
 }
@@ -520,16 +539,65 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
   );
   const onConnect = useCallback(
     (c: Connection) => {
-      takeSnapshot();
-      // 新邊預設無箭頭;側邊取拖出 / 落下的 handle。
+      if (!c.source || !c.target) return;
+      // 側邊取拖出 / 落下的 handle。
       const fromSide = handleSide(c.sourceHandle, 'R');
       const toSide = handleSide(c.targetHandle, 'L');
-      const data: EdgeData = { fromSide, toSide, arrowFrom: false, arrowTo: false };
+
+      // mermaid 邊端點只能是 service/junction,不能是 group。若端點是 group →
+      // 錨到組內一個 service(空 group 自動補一個),並標記 {group}(線接到 group 邊界)。
+      const created: Node[] = [];
+      const usedIds = new Set(nodes.map((n) => n.id));
+      let counter = 1;
+      const newServiceId = () => {
+        let id = `svc_${counter++}`;
+        while (usedIds.has(id)) id = `svc_${counter++}`;
+        usedIds.add(id);
+        return id;
+      };
+      const resolve = (nodeId: string): { id: string; isGroup: boolean } => {
+        const n = nodes.find((x) => x.id === nodeId);
+        if (n?.type !== 'archGroup') return { id: nodeId, isGroup: false };
+        const inGroup =
+          nodes.find((x) => x.type === 'service' && x.parentId === nodeId) ??
+          created.find((x) => x.parentId === nodeId);
+        if (inGroup) return { id: inGroup.id, isGroup: true };
+        const sid = newServiceId();
+        created.push({
+          id: sid,
+          type: 'service',
+          data: { nid: sid, title: '', icon: '' },
+          position: { x: GROUP_PAD / 2, y: GROUP_PAD },
+          style: { width: SVC_W, height: SVC_H },
+          parentId: nodeId,
+          extent: 'parent',
+        });
+        return { id: sid, isGroup: true };
+      };
+
+      const from = resolve(c.source);
+      const to = resolve(c.target);
+      if (from.id === to.id) return; // 同一節點(同一空 group 兩端)→ 不建自連
+
+      takeSnapshot();
+      const data: EdgeData = {
+        fromSide,
+        toSide,
+        arrowFrom: false,
+        arrowTo: false,
+        fromGroup: from.isGroup || undefined,
+        toGroup: to.isGroup || undefined,
+      };
+      if (created.length) {
+        setNodes((ns) => [...ns, ...created]);
+        message.info(`已在空 group 內自動新增 ${created.length} 個 service`);
+      }
       setEdges((e) =>
         addEdge(
           {
-            ...c,
-            id: `a-${c.source}-${c.target}-${e.length}`,
+            source: from.id,
+            target: to.id,
+            id: `a-${from.id}-${to.id}-${e.length}`,
             sourceHandle: `s-${fromSide}`,
             targetHandle: `t-${toSide}`,
             data,
@@ -538,7 +606,7 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
         ),
       );
     },
-    [takeSnapshot],
+    [nodes, takeSnapshot],
   );
 
   const reLayout = () => setNodes((n) => layout(n, edges));
