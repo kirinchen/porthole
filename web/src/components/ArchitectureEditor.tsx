@@ -15,6 +15,7 @@ import {
   Controls,
   MiniMap,
   Handle,
+  NodeResizer,
   Position,
   MarkerType,
   addEdge,
@@ -181,7 +182,7 @@ function JunctionNode() {
 }
 
 /** 自訂節點:group = 標題框(React Flow parent 容器)。 */
-function GroupNode({ data }: NodeProps) {
+function GroupNode({ data, selected }: NodeProps) {
   const d = data as { title?: string; icon?: string; nid?: string };
   const emoji = iconEmoji(d.icon);
   return (
@@ -195,6 +196,8 @@ function GroupNode({ data }: NodeProps) {
         boxSizing: 'border-box',
       }}
     >
+      {/* 選取時出現四角/四邊把手,可拖拉縮放 group(applyNodeChanges 會寫回 style 尺寸)。 */}
+      <NodeResizer isVisible={selected} minWidth={SVC_W + GROUP_PAD} minHeight={SVC_H + GROUP_PAD} />
       <div
         style={{
           position: 'absolute',
