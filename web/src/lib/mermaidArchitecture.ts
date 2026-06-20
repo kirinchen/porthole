@@ -9,7 +9,10 @@
  *  - 邊:      `{id}{:side} {edge} {:side}{id}`,例 `db:L -- R:server`。
  *      side ∈ L R T B(left/right/top/bottom)。
  *      edge:'--' 基底,可帶箭頭 '-->' / '<--' / '<-->' / '--'。
- *      端點也可是 group:在 id 後接 '{group}',例 `server:R --> L:api{group}`。
+ *      {group} 修飾子:接在「端點 id 正後方」(例 `server{group}:R --> L:db`),
+ *        意為該端點(service/junction)的線改接到其「所屬 group 的邊界」——視覺上即連到 group。
+ *        端點 id 永遠是 service/junction,**不可**是 group id(mermaid 會 DB 階段 TypeError);
+ *        且 {group} 僅當該 service 屬於某 group、兩端在不同 group 時合法。
  *  - icon:內建 cloud/database/disk/internet/server,或 iconify 名稱(如 logos:aws)——當字串保留。
  * 略過不支援 / 未知行,不丟例外。
  * GUI 存檔走 serializeArchitecture → 正規化重寫該 mermaid 區塊(註解 / 手動排版會丟)。
@@ -40,8 +43,8 @@ export interface ArchEdge {
   toSide: Side;
   arrowFrom: boolean; // 左箭頭(指向 from)
   arrowTo: boolean; // 右箭頭(指向 to)
-  fromGroup?: boolean; // from 端點為 group({group})
-  toGroup?: boolean; // to 端點為 group({group})
+  fromGroup?: boolean; // from 端點的 {group} 修飾子(線接到該 service 所屬 group 邊界)
+  toGroup?: boolean; // to 端點的 {group} 修飾子
 }
 export interface ArchModel {
   groups: ArchGroup[];
@@ -155,28 +158,66 @@ function edgeToken(arrowFrom: boolean, arrowTo: boolean): string {
   return `${arrowFrom ? '<' : ''}--${arrowTo ? '>' : ''}`;
 }
 
-/** 模型 → 正規化 mermaid architecture-beta 文字。 */
+/**
+ * architecture-beta 的 id 僅允許 `[A-Za-z0-9_]`(含空白 / 中文 / 點的字串要放在 title `[...]`,
+ * 不能當 id,否則 mermaid lexer 直接爆)。把任意字串正規化為合法 id。
+ */
+export function sanitizeArchId(raw: string): string {
+  let s = raw.replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+  if (!s) s = 'id';
+  if (/^[0-9]/.test(s)) s = `n${s}`;
+  return s;
+}
+
+/** 建 oldId→safeId 對照表(sanitize + 去重),供序列化時節點 / parent / group / 邊端點一致改寫。 */
+function buildIdMap(m: ArchModel): Map<string, string> {
+  const map = new Map<string, string>();
+  const used = new Set<string>();
+  for (const n of [...m.groups, ...m.services, ...m.junctions]) {
+    if (map.has(n.id)) continue;
+    const base = sanitizeArchId(n.id);
+    let cand = base;
+    let i = 2;
+    while (used.has(cand)) cand = `${base}_${i++}`;
+    used.add(cand);
+    map.set(n.id, cand);
+  }
+  return map;
+}
+
+/** 模型 → 正規化 mermaid architecture-beta 文字(id 一律 sanitize 以保證可解析)。 */
 export function serializeArchitecture(m: ArchModel): string {
+  const idMap = buildIdMap(m);
+  const idOf = (id: string) => idMap.get(id) ?? sanitizeArchId(id);
   const lines = ['architecture-beta'];
 
+  // id 被 sanitize 改寫且本來沒 title 時,用原始 id 當 title,避免人類標籤(如中文)整個丟失。
+  // title 不能含 ']'(會破壞 `[...]`),先剔除。
+  const keepLabel = (rawId: string, title?: string): string | undefined => {
+    if (title) return title;
+    if (idOf(rawId) === rawId) return undefined;
+    const t = rawId.replace(/]/g, '').trim();
+    return t || undefined;
+  };
+
   for (const g of m.groups) {
-    let line = `    group ${g.id}${nodeDecor(g.icon, g.title)}`;
-    if (g.parent) line += ` in ${g.parent}`;
+    let line = `    group ${idOf(g.id)}${nodeDecor(g.icon, keepLabel(g.id, g.title))}`;
+    if (g.parent) line += ` in ${idOf(g.parent)}`;
     lines.push(line);
   }
   for (const s of m.services) {
-    let line = `    service ${s.id}${nodeDecor(s.icon, s.title)}`;
-    if (s.group) line += ` in ${s.group}`;
+    let line = `    service ${idOf(s.id)}${nodeDecor(s.icon, keepLabel(s.id, s.title))}`;
+    if (s.group) line += ` in ${idOf(s.group)}`;
     lines.push(line);
   }
   for (const j of m.junctions) {
-    let line = `    junction ${j.id}`;
-    if (j.group) line += ` in ${j.group}`;
+    let line = `    junction ${idOf(j.id)}`;
+    if (j.group) line += ` in ${idOf(j.group)}`;
     lines.push(line);
   }
   for (const e of m.edges) {
-    const left = `${e.from}${e.fromGroup ? '{group}' : ''}:${e.fromSide}`;
-    const right = `${e.toSide}:${e.to}${e.toGroup ? '{group}' : ''}`;
+    const left = `${idOf(e.from)}${e.fromGroup ? '{group}' : ''}:${e.fromSide}`;
+    const right = `${e.toSide}:${idOf(e.to)}${e.toGroup ? '{group}' : ''}`;
     lines.push(`    ${left} ${edgeToken(e.arrowFrom, e.arrowTo)} ${right}`);
   }
 

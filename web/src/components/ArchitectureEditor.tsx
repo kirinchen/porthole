@@ -30,7 +30,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import dagre from '@dagrejs/dagre';
-import { Button, Modal, Input, Select, Space, Typography, message } from 'antd';
+import { Button, Modal, Input, Select, Space, Switch, Tooltip, Typography, message } from 'antd';
 import {
   PlusOutlined,
   UndoOutlined,
@@ -228,12 +228,20 @@ type Snap = { nodes: Node[]; edges: Edge[] };
 
 const GROUP_PAD = 40;
 
-/** edge.data:邊的結構化欄位(端點為 group 由節點 type 判定,不存於此)。 */
+/**
+ * edge.data:邊的結構化欄位。
+ * fromGroup/toGroup = mermaid 的 `{group}` 修飾子:該端點(service)的線改接到
+ * 其「所屬 group 的邊界」,視覺上即「連到 group」。注意 mermaid 不允許 group id
+ * 直接當端點;端點永遠是 service/junction,{group} 只改線的落點。
+ * 合法條件:該端點 service 屬於某 group,且兩端 service 在「不同」group。
+ */
 type EdgeData = {
   fromSide: Side;
   toSide: Side;
   arrowFrom: boolean;
   arrowTo: boolean;
+  fromGroup?: boolean;
+  toGroup?: boolean;
 };
 
 /** 由 sourceHandle / targetHandle id(如 "s-R" / "t-L")取側邊。 */
@@ -339,6 +347,8 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
         toSide: e.toSide,
         arrowFrom: e.arrowFrom,
         arrowTo: e.arrowTo,
+        fromGroup: e.fromGroup,
+        toGroup: e.toGroup,
       };
       return {
         id: `a${i}-${e.from}-${e.to}`,
@@ -389,6 +399,10 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
     fromSide: Side;
     toSide: Side;
     arrow: ArrowKind;
+    fromGroup: boolean;
+    toGroup: boolean;
+    srcGroup?: string; // 起點 service 所屬 group(undefined=頂層),用於判斷 {group} 是否合法
+    tgtGroup?: string; // 終點 service 所屬 group
   } | null>(null);
   const [adding, setAdding] = useState<{ kind: 'service' | 'archGroup'; id: string } | null>(null);
 
@@ -617,6 +631,11 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
     if (!editEdge) return;
     takeSnapshot();
     const { arrowFrom, arrowTo } = fromArrowKind(editEdge.arrow);
+    // {group} gate:端點在某 group 內且兩端不同 group 才保留,讓 edge.data 與 UI 顯示一致
+    //(避免 stale true 殘留,日後端點移到合法 group 時意外復活)。
+    const diff = editEdge.srcGroup !== editEdge.tgtGroup;
+    const canFrom = editEdge.srcGroup !== undefined && diff;
+    const canTo = editEdge.tgtGroup !== undefined && diff;
     setEdges((es) =>
       es.map((e) => {
         if (e.id !== editEdge.id) return e;
@@ -625,6 +644,8 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
           toSide: editEdge.toSide,
           arrowFrom,
           arrowTo,
+          fromGroup: (editEdge.fromGroup && canFrom) || undefined,
+          toGroup: (editEdge.toGroup && canTo) || undefined,
         };
         return {
           ...e,
@@ -647,7 +668,8 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
   };
 
   const save = () => {
-    const typeOf = new Map(nodes.map((n) => [n.id, n.type]));
+    // 端點所屬 group(parentId);用於驗證 {group} 修飾子是否合法。
+    const groupOf = new Map(nodes.map((n) => [n.id, n.parentId ? String(n.parentId) : undefined]));
     const groups: ArchGroup[] = [];
     const services: ArchService[] = [];
     const junctions: ArchJunction[] = [];
@@ -670,9 +692,17 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
       const src = nodes.find((n) => n.id === e.source);
       const tgt = nodes.find((n) => n.id === e.target);
       if (!src || !tgt) return [];
+      // mermaid 不允許 group id 當邊端點(DB 階段 TypeError)。group 無 handle 拖不出
+      // 這種邊,但舊檔 / 手寫 mermaid 經 parse→init 可能帶進來 → 序列化前丟棄。
+      if (src.type === 'archGroup' || tgt.type === 'archGroup') return [];
       const d = (e.data ?? {}) as Partial<EdgeData>;
       const srcId = String((src.data as { nid?: string }).nid ?? e.source);
       const tgtId = String((tgt.data as { nid?: string }).nid ?? e.target);
+      // {group} 合法條件:該端點 service 屬於某 group,且兩端在不同 group
+      //(mermaid 否則會 'two groups' 錯誤)。不合法則丟旗標,絕不輸出非法語法。
+      const srcGrp = groupOf.get(e.source);
+      const tgtGrp = groupOf.get(e.target);
+      const sameGroup = srcGrp !== undefined && srcGrp === tgtGrp;
       return [
         {
           from: srcId,
@@ -681,8 +711,8 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
           toSide: d.toSide ?? handleSide(e.targetHandle, 'L'),
           arrowFrom: d.arrowFrom ?? false,
           arrowTo: d.arrowTo ?? false,
-          fromGroup: typeOf.get(e.source) === 'archGroup' || undefined,
-          toGroup: typeOf.get(e.target) === 'archGroup' || undefined,
+          fromGroup: d.fromGroup && srcGrp !== undefined && !sameGroup ? true : undefined,
+          toGroup: d.toGroup && tgtGrp !== undefined && !sameGroup ? true : undefined,
         },
       ];
     });
@@ -790,11 +820,17 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
           nodeTypes={nodeTypes}
           onEdgeDoubleClick={(_e, ed) => {
             const d = (ed.data ?? {}) as Partial<EdgeData>;
+            const src = nodes.find((n) => n.id === ed.source);
+            const tgt = nodes.find((n) => n.id === ed.target);
             setEditEdge({
               id: ed.id,
               fromSide: d.fromSide ?? 'R',
               toSide: d.toSide ?? 'L',
               arrow: toArrowKind(d.arrowFrom ?? false, d.arrowTo ?? false),
+              fromGroup: !!d.fromGroup,
+              toGroup: !!d.toGroup,
+              srcGroup: src?.parentId ? String(src.parentId) : undefined,
+              tgtGroup: tgt?.parentId ? String(tgt.parentId) : undefined,
             });
           }}
           deleteKeyCode={['Delete', 'Backspace']}
@@ -836,7 +872,10 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
             <Input
               style={{ width: 240 }}
               value={editNode?.nid ?? ''}
-              onChange={(e) => setEditNode((s) => (s ? { ...s, nid: e.target.value } : s))}
+              onChange={(e) => {
+                const v = e.target.value.replace(/[^A-Za-z0-9_]+/g, '_'); // id 僅允許 \w(空白/中文→_)
+                setEditNode((s) => (s ? { ...s, nid: v } : s));
+              }}
               data-loc="arch:node-id"
             />
           </span>
@@ -899,7 +938,7 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
         </Space>
       </Modal>
 
-      {/* 邊編輯:fromSide / toSide / 箭頭 / 刪 */}
+      {/* 邊編輯:fromSide / toSide / 箭頭 / 連到 group 邊界({group})/ 刪 */}
       <Modal
         title="編輯連線"
         open={!!editEdge}
@@ -950,6 +989,52 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
               data-loc="arch:edge-arrow"
             />
           </span>
+          {/* {group}:把端點的線接到該 service 所屬 group 邊界(mermaid 不支援 group 直接當端點)。
+              僅當該端點在某 group 內、且兩端在不同 group 時可用。 */}
+          {(() => {
+            const sg = editEdge?.srcGroup;
+            const tg = editEdge?.tgtGroup;
+            const diff = sg !== tg; // 不同 group(含一端為頂層)
+            const canFrom = sg !== undefined && diff;
+            const canTo = tg !== undefined && diff;
+            return (
+              <>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  連到 group:把端點的線改接到該 service 所屬 group 的邊界(
+                  <code>{'{group}'}</code>)。需該端點在某 group 內,且兩端在不同 group。
+                </Typography.Text>
+                <span>
+                  起點連到 group 邊界{' '}
+                  {/* Tooltip 包外層 span:disabled 的 button 不發 hover,直接包 Switch 提示出不來。 */}
+                  <Tooltip title={canFrom ? '' : '起點 service 需屬於某 group,且與終點不同 group'}>
+                    <span style={{ display: 'inline-flex' }}>
+                      <Switch
+                        size="small"
+                        disabled={!canFrom}
+                        checked={!!editEdge?.fromGroup && canFrom}
+                        onChange={(v) => setEditEdge((s) => (s ? { ...s, fromGroup: v } : s))}
+                        data-loc="arch:edge-from-group"
+                      />
+                    </span>
+                  </Tooltip>
+                </span>
+                <span>
+                  終點連到 group 邊界{' '}
+                  <Tooltip title={canTo ? '' : '終點 service 需屬於某 group,且與起點不同 group'}>
+                    <span style={{ display: 'inline-flex' }}>
+                      <Switch
+                        size="small"
+                        disabled={!canTo}
+                        checked={!!editEdge?.toGroup && canTo}
+                        onChange={(v) => setEditEdge((s) => (s ? { ...s, toGroup: v } : s))}
+                        data-loc="arch:edge-to-group"
+                      />
+                    </span>
+                  </Tooltip>
+                </span>
+              </>
+            );
+          })()}
         </Space>
       </Modal>
 
@@ -966,9 +1051,12 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
         <Input
           autoFocus
           value={adding?.id ?? ''}
-          onChange={(e) => setAdding((s) => (s ? { ...s, id: e.target.value } : s))}
+          onChange={(e) => {
+            const v = e.target.value.replace(/[^A-Za-z0-9_]+/g, '_'); // id 僅允許 \w(空白/中文→_)
+            setAdding((s) => (s ? { ...s, id: v } : s));
+          }}
           onPressEnter={doAdd}
-          placeholder="id(如 db、api)"
+          placeholder="id(如 db、api;空白/中文請填到 title)"
           data-loc="arch:add-id"
         />
       </Modal>
