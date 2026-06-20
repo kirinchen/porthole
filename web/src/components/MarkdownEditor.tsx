@@ -182,6 +182,16 @@ const GUI_SAMPLES: { label: string; code: string }[] = [
     label: '＋ Sequence diagram',
     code: fence(['sequenceDiagram', '    participant A as Alice', '    participant B as Bob', '    A->>B: Hello', '    B-->>A: Hi']),
   },
+  {
+    label: '＋ Architecture',
+    code: fence([
+      'architecture-beta',
+      '    group api(cloud)[API]',
+      '    service db(database)[Database] in api',
+      '    service server(server)[Server] in api',
+      '    db:L -- R:server',
+    ]),
+  },
 ];
 
 // 空白行右鍵選單(純 DOM,輕量;不引 Antd 進 CM6 widget 樹)。
