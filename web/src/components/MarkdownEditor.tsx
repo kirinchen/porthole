@@ -27,6 +27,12 @@ import { markdown } from '@codemirror/lang-markdown';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { createRoot, type Root } from 'react-dom/client';
 import MermaidBlock from './MermaidBlock';
+import D2Block from './D2Block';
+
+/** 支援 GUI / 互動 widget 的 fenced 圖型語言。 */
+const FENCE_LANGS = ['mermaid', 'd2'] as const;
+type FenceLang = (typeof FENCE_LANGS)[number];
+const FENCE_COMPONENT = { mermaid: MermaidBlock, d2: D2Block } as const;
 
 interface Props {
   value: string;
@@ -48,14 +54,18 @@ function fenceCode(state: EditorState, node: SyntaxNode): string {
   return t ? state.doc.sliceString(t.from, t.to) : '';
 }
 
-/** 找第 index 個 mermaid fenced block 的 from/to(全文件,順序與渲染一致)。 */
-function findMermaidBlock(state: EditorState, index: number): { from: number; to: number } | null {
+/** 找第 index 個「指定語言」fenced block 的 from/to(同語言內計數,順序與渲染一致)。 */
+function findFenceBlock(
+  state: EditorState,
+  lang: FenceLang,
+  index: number,
+): { from: number; to: number } | null {
   let i = 0;
   let found: { from: number; to: number } | null = null;
   syntaxTree(state).iterate({
     enter: (node) => {
       if (node.name === 'FencedCode') {
-        if (fenceInfo(state, node.node) === 'mermaid') {
+        if (fenceInfo(state, node.node) === lang) {
           if (i === index) found = { from: node.from, to: node.to };
           i++;
         }
@@ -67,33 +77,34 @@ function findMermaidBlock(state: EditorState, index: number): { from: number; to
   return found;
 }
 
-/** mermaid 區塊套用(編輯/GUI)→ 改寫文件中對應 fenced block。 */
-function applyMermaidBlock(view: EditorView, index: number, newCode: string): void {
-  const range = findMermaidBlock(view.state, index);
+/** 圖型區塊套用(編輯/GUI)→ 改寫文件中對應 fenced block(保留原語言)。 */
+function applyFenceBlock(view: EditorView, lang: FenceLang, index: number, newCode: string): void {
+  const range = findFenceBlock(view.state, lang, index);
   if (!range) return;
-  const insert = '```mermaid\n' + newCode.replace(/\s+$/, '') + '\n```';
+  const insert = '```' + lang + '\n' + newCode.replace(/\s+$/, '') + '\n```';
   view.dispatch({ changes: { from: range.from, to: range.to, insert } });
 }
 
-/** 把 mermaid block 渲染成互動 box(React root 掛進 CM6 widget)。 */
-class MermaidWidget extends WidgetType {
+/** 把圖型 block(mermaid / d2)渲染成互動 box(React root 掛進 CM6 widget)。 */
+class FenceWidget extends WidgetType {
   constructor(
+    readonly lang: FenceLang,
     readonly code: string,
     readonly index: number,
   ) {
     super();
   }
-  eq(o: MermaidWidget) {
-    return o.code === this.code && o.index === this.index;
+  eq(o: FenceWidget) {
+    return o.lang === this.lang && o.code === this.code && o.index === this.index;
   }
   toDOM(view: EditorView) {
     const dom = document.createElement('div');
-    dom.setAttribute('data-loc', 'explore:edit:mermaid');
+    dom.setAttribute('data-loc', `explore:edit:${this.lang}`);
     const root = createRoot(dom);
     root.render(
-      createElement(MermaidBlock, {
+      createElement(FENCE_COMPONENT[this.lang], {
         code: this.code,
-        onApply: (nc: string) => applyMermaidBlock(view, this.index, nc),
+        onApply: (nc: string) => applyFenceBlock(view, this.lang, this.index, nc),
       }),
     );
     (dom as unknown as { _root: Root })._root = root;
@@ -108,21 +119,23 @@ class MermaidWidget extends WidgetType {
   }
 }
 
-/** mermaid block widget 是 block / 跨行 replace → 只能走 StateField(不可由 plugin 提供)。 */
-function buildMermaidDecos(state: EditorState): DecorationSet {
+/** 圖型 block widget 是 block / 跨行 replace → 只能走 StateField(不可由 plugin 提供)。 */
+function buildFenceDecos(state: EditorState): DecorationSet {
   const ranges: Range<Decoration>[] = [];
-  let i = 0;
+  const counter: Record<FenceLang, number> = { mermaid: 0, d2: 0 }; // 同語言各自計數
   syntaxTree(state).iterate({
     enter: (node) => {
       if (node.name === 'FencedCode') {
-        if (fenceInfo(state, node.node) === 'mermaid') {
+        const lang = fenceInfo(state, node.node);
+        if ((FENCE_LANGS as readonly string[]).includes(lang)) {
+          const l = lang as FenceLang;
           const code = fenceCode(state, node.node);
           const from = state.doc.lineAt(node.from).from;
           const to = state.doc.lineAt(node.to).to;
           ranges.push(
-            Decoration.replace({ widget: new MermaidWidget(code, i), block: true }).range(from, to),
+            Decoration.replace({ widget: new FenceWidget(l, code, counter[l]), block: true }).range(from, to),
           );
-          i++;
+          counter[l]++;
         }
         return false;
       }
@@ -133,8 +146,8 @@ function buildMermaidDecos(state: EditorState): DecorationSet {
 }
 
 const mermaidField = StateField.define<DecorationSet>({
-  create: (state) => buildMermaidDecos(state),
-  update: (value, tr) => (tr.docChanged ? buildMermaidDecos(tr.state) : value),
+  create: (state) => buildFenceDecos(state),
+  update: (value, tr) => (tr.docChanged ? buildFenceDecos(tr.state) : value),
   provide: (f) => EditorView.decorations.from(f),
 });
 
@@ -191,6 +204,11 @@ const GUI_SAMPLES: { label: string; code: string }[] = [
       '    service server(server)[Server] in api',
       '    db:L -- R:server',
     ]),
+  },
+  {
+    // D2:容器是一等公民,支援「容器對容器」邊(mermaid architecture 做不到)。走後端 d2 CLI 渲染。
+    label: '＋ D2(容器對容器)',
+    code: ['```d2', 'api: API 層 {', '  server: 伺服器', '}', 'data: 資料層 {', '  db: 資料庫', '}', 'api -> data: 容器對容器', 'api.server -> data.db', '```'].join('\n'),
   },
 ];
 
@@ -297,8 +315,9 @@ function buildDecorations(view: EditorView): DecorationSet {
       enter: (node) => {
         const name = node.name;
 
-        // mermaid block 由上面的 widget 接手,行內樣式跳過(否則與 block 裝飾重疊)。
-        if (name === 'FencedCode' && fenceInfo(view.state, node.node) === 'mermaid') return false;
+        // 圖型 block(mermaid / d2)由 widget 接手,行內樣式跳過(否則與 block 裝飾重疊)。
+        if (name === 'FencedCode' && (FENCE_LANGS as readonly string[]).includes(fenceInfo(view.state, node.node)))
+          return false;
 
         const h = /^ATXHeading([1-6])$/.exec(name);
         if (h) {

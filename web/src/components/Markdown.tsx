@@ -8,6 +8,7 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import MermaidBlock from './MermaidBlock';
+import D2Block from './D2Block';
 
 interface Props {
   children: string;
@@ -28,6 +29,14 @@ export default function Markdown({ children, onMermaidChange }: Props) {
           if (/\blanguage-mermaid\b/.test(cls)) {
             return (
               <MermaidBlock
+                code={text}
+                onApply={onMermaidChange ? (nc) => onMermaidChange(text, nc) : undefined}
+              />
+            );
+          }
+          if (/\blanguage-d2\b/.test(cls)) {
+            return (
+              <D2Block
                 code={text}
                 onApply={onMermaidChange ? (nc) => onMermaidChange(text, nc) : undefined}
               />

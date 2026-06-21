@@ -44,6 +44,16 @@
 
 ---
 
+## D2 圖型(容器對容器)
+
+` ```d2 ` 區塊用 [D2](https://d2lang.com) 繪製。D2 的**容器是一等公民**,原生支援「**容器對容器**」的邊——這是 mermaid architecture-beta 做不到的(它的 group 不能當邊端點)。GUI 編輯器(React Flow)裡 container 與 shape 四邊都有接點,直接拖就能連;下圖那條「容器對容器」就是從一個容器框邊連到另一個容器框邊:
+
+![d2](assets/screenshots/gui-d2.png)
+
+渲染走後端 shell out `d2` CLI(前端只收 SVG)。需在 host 安裝 d2 並於 `.env` 設 `D2_BIN`(預設吃 PATH);沒裝不影響其他功能。安裝見 [d2lang.com](https://d2lang.com/tour/install)。
+
+---
+
 ## 安全模型(請先讀)
 
 porthole 預設只給**單機自用 + 信任網路**。請務必理解:

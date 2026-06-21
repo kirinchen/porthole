@@ -16,6 +16,7 @@ import fsRoutes from './routes/fs.ts';
 import chatRoutes from './routes/chat.ts';
 import sessionRoutes from './routes/session.ts';
 import cliRoutes from './routes/cli.ts';
+import d2Routes from './routes/d2.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIST = path.resolve(__dirname, '../web/dist');
@@ -41,6 +42,7 @@ await app.register(fsRoutes);
 await app.register(chatRoutes);
 await app.register(sessionRoutes);
 await app.register(cliRoutes);
+await app.register(d2Routes);
 
 // prod:serve 前端 build + SPA fallback。dev 時 web/dist 不存在 → 略過,前端走 vite。
 if (fs.existsSync(WEB_DIST)) {
