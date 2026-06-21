@@ -206,8 +206,8 @@ const GUI_SAMPLES: { label: string; code: string }[] = [
     ]),
   },
   {
-    // D2:容器是一等公民,支援「容器對容器」邊(mermaid architecture 做不到)。走後端 d2 CLI 渲染。
-    label: '＋ D2(容器對容器)',
+    // D2 架構圖:容器是一等公民,支援「容器對容器」邊(mermaid architecture 做不到)。走後端 d2 CLI 渲染。
+    label: '＋ D2 架構圖',
     code: ['```d2', 'api: API 層 {', '  server: 伺服器', '}', 'data: 資料層 {', '  db: 資料庫', '}', 'api -> data: 容器對容器', 'api.server -> data.db', '```'].join('\n'),
   },
 ];

@@ -44,9 +44,9 @@
 
 ---
 
-## D2 圖型(容器對容器)
+## D2 架構圖
 
-` ```d2 ` 區塊用 [D2](https://d2lang.com) 繪製。D2 的**容器是一等公民**,原生支援「**容器對容器**」的邊——這是 mermaid architecture-beta 做不到的(它的 group 不能當邊端點)。GUI 編輯器(React Flow)裡 container 與 shape 四邊都有接點,直接拖就能連;下圖那條「容器對容器」就是從一個容器框邊連到另一個容器框邊:
+` ```d2 ` 區塊用 [D2](https://d2lang.com) 繪製架構圖(C4 風格:container 為一等公民)。D2 原生支援「**容器對容器**」的邊——這是 mermaid architecture-beta 做不到的(它的 group 不能當邊端點)。GUI 編輯器(React Flow)裡 container 與 shape 四邊都有接點,直接拖就能連;下圖那條「容器對容器」就是從一個容器框邊連到另一個容器框邊:
 
 ![d2](assets/screenshots/gui-d2.png)
 
