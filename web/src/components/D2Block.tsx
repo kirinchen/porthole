@@ -5,7 +5,7 @@
  *  - SVG 來自外部子程序輸出,注入前先淨化(去 script / on* / javascript:)。
  *  - GUI 編輯器(D2Editor)→ lazy import,重 / 非預覽必需才載。
  */
-import { useEffect, useRef, useState, lazy, Suspense } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { Segmented, Input, Button, Space, Spin, Switch } from 'antd';
 import { FullscreenOutlined } from '@ant-design/icons';
@@ -69,9 +69,9 @@ function sanitizeSvg(raw: string): string {
 }
 
 export default function D2Block({ code, onApply }: Props) {
-  const ref = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [svg, setSvg] = useState(''); // 已淨化的 SVG;用 state 而非 ref,避免 loading 卸載 div 時 SVG 落空
   const [mode, setMode] = useState<Mode>('preview');
   const [draft, setDraft] = useState(code);
   const [guiFull, setGuiFull] = useState(false); // GUI 全螢幕(滿版覆蓋視窗)
@@ -97,18 +97,18 @@ export default function D2Block({ code, onApply }: Props) {
         if (!alive) return;
         if (!res.ok) {
           setErr(data.error ?? `渲染失敗(${res.status})`);
-          if (ref.current) ref.current.innerHTML = '';
+          setSvg('');
           return;
         }
-        const svg = sanitizeSvg(data.svg ?? '');
-        if (ref.current) ref.current.innerHTML = svg;
-        setErr(svg ? null : 'SVG 淨化失敗(空白輸出)');
+        const clean = sanitizeSvg(data.svg ?? '');
+        setSvg(clean);
+        setErr(clean ? null : 'SVG 淨化失敗(空白輸出)');
       } catch (e) {
         if (!alive) return;
         // abort 是正常取消,不當錯誤
         if ((e as Error).name === 'AbortError') return;
         setErr((e as Error).message ?? String(e));
-        if (ref.current) ref.current.innerHTML = '';
+        setSvg('');
       } finally {
         if (alive) setLoading(false);
       }
@@ -179,7 +179,8 @@ export default function D2Block({ code, onApply }: Props) {
             <Spin />
           </div>
         ) : (
-          <div ref={ref} style={{ textAlign: 'center' }} />
+          // 已淨化,故用 dangerouslySetInnerHTML;由 state 餵入(非 ref),避免 loading 卸載時落空
+          <div style={{ textAlign: 'center' }} dangerouslySetInnerHTML={{ __html: svg }} />
         ))}
 
       {mode === 'edit' && (
