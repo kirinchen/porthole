@@ -5,11 +5,12 @@
  *  - SVG 來自外部子程序輸出,注入前先淨化(去 script / on* / javascript:)。
  *  - GUI 編輯器(D2Editor)→ lazy import,重 / 非預覽必需才載。
  */
-import { useEffect, useState, lazy, Suspense } from 'react';
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { Segmented, Input, Button, Space, Spin, Switch } from 'antd';
 import { FullscreenOutlined } from '@ant-design/icons';
 import type { SegmentedValue } from 'antd/es/segmented';
+import { markKeepGui, takeKeepGui } from '../lib/guiSession';
 
 const D2Editor = lazy(() => import('./D2Editor'));
 
@@ -19,6 +20,8 @@ interface Props {
   code: string;
   /** 有給 → 可編輯(顯示 tab、套用寫回);沒給 → 純預覽。 */
   onApply?: (newCode: string) => void;
+  /** 跨 remount 保留 GUI 狀態的鍵(由 CM6 widget 傳入 lang:index);Chat 預覽不給。 */
+  sessionKey?: string;
 }
 
 /**
@@ -68,13 +71,15 @@ function sanitizeSvg(raw: string): string {
   }
 }
 
-export default function D2Block({ code, onApply }: Props) {
+export default function D2Block({ code, onApply, sessionKey }: Props) {
+  // remount 後若有 keep 標記 → 直接回 GUI(及全螢幕),支援「Ctrl+S 存檔但留在編輯器」。
+  const restored = useMemo(() => takeKeepGui(sessionKey), [sessionKey]);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [svg, setSvg] = useState(''); // 已淨化的 SVG;用 state 而非 ref,避免 loading 卸載 div 時 SVG 落空
-  const [mode, setMode] = useState<Mode>('preview');
+  const [mode, setMode] = useState<Mode>(restored ? 'gui' : 'preview');
   const [draft, setDraft] = useState(code);
-  const [guiFull, setGuiFull] = useState(false); // GUI 全螢幕(滿版覆蓋視窗)
+  const [guiFull, setGuiFull] = useState(restored?.full ?? false); // GUI 全螢幕(滿版覆蓋視窗)
 
   const editable = !!onApply;
 
@@ -218,10 +223,19 @@ export default function D2Block({ code, onApply }: Props) {
               <D2Editor
                 code={code}
                 fill={guiFull}
-                onSave={(c) => {
-                  onApply?.(c);
-                  setGuiFull(false);
-                  setMode('preview');
+                onSave={(c, opts) => {
+                  // stay(Ctrl+S / 儲存):寫回但留在 GUI。改寫文件會使本元件 remount,
+                  // 故先標記 sessionKey,讓 remount 後的新元件直接回到 GUI(及全螢幕)。
+                  if (opts?.stay) {
+                    if (sessionKey) markKeepGui(sessionKey, guiFull);
+                    onApply?.(c);
+                    // 觸發 Explore 存檔到磁碟(不退出編輯)。onApply 已同步更新 draft。
+                    if (sessionKey) window.dispatchEvent(new Event('porthole:save-file'));
+                  } else {
+                    onApply?.(c);
+                    setGuiFull(false);
+                    setMode('preview');
+                  }
                 }}
                 onClose={() => {
                   setGuiFull(false);

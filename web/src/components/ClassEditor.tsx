@@ -6,7 +6,7 @@
  *  - 「套用」→ serializeClass → onSave(正規化 mermaid 文字)。
  *  本元件較重(React Flow + dagre)→ 由上層以 lazy + Suspense 載入。
  */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -170,7 +170,7 @@ function ClassNodeView({ data }: NodeProps) {
 
 interface Props {
   code: string;
-  onSave: (code: string) => void;
+  onSave: (code: string, opts?: { stay?: boolean }) => void;
   onClose: () => void;
   /** 滿版模式:撐滿父容器高度(由上層的全螢幕切換帶入)。 */
   fill?: boolean;
@@ -272,6 +272,21 @@ export default function ClassEditor({ code, onSave, onClose, fill }: Props) {
   const [past, setPast] = useState<Snap[]>([]);
   const [future, setFuture] = useState<Snap[]>([]);
   const clipboard = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null);
+
+  // saveRef:讓 window Ctrl+S 取到最新 save(save 定義在後且依賴 nodes/edges,避免 stale 閉包)。
+  const saveRef = useRef<(stay?: boolean) => void>(() => {});
+
+  // Ctrl+S = 存檔但留在編輯器。綁 window(不限 canvas 焦點,點過工具列/Modal 也有效)。
+  useEffect(() => {
+    const onWinKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveRef.current(true);
+      }
+    };
+    window.addEventListener('keydown', onWinKey);
+    return () => window.removeEventListener('keydown', onWinKey);
+  }, []);
 
   // 在「變動之前」呼叫:把當前狀態推進 past、清空 future(上限 50)。
   const takeSnapshot = useCallback(() => {
@@ -509,7 +524,7 @@ export default function ClassEditor({ code, onSave, onClose, fill }: Props) {
   const removeMemberRow = (idx: number) =>
     setEditClass((s) => (s ? { ...s, members: s.members.filter((_, i) => i !== idx) } : s));
 
-  const save = () => {
+  const save = (stay = false) => {
     // node.id → 目前 data.name 對應:rename 後節點 id 不變(仍為舊類名),
     // 但 data.name 已更新;關係邊以 id 指向端點,故序列化時一律經此對應換回最新類名,
     // 確保關係 left/right 與類名一致(不會殘留舊名)。
@@ -544,8 +559,9 @@ export default function ClassEditor({ code, onSave, onClose, fill }: Props) {
         ];
       }),
     };
-    onSave(serializeClass(model));
+    onSave(serializeClass(model), { stay });
   };
+  saveRef.current = save; // 每次 render 更新,供 Ctrl+S 取最新
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: fill ? '100%' : '70vh' }}>
@@ -653,7 +669,10 @@ export default function ClassEditor({ code, onSave, onClose, fill }: Props) {
         <Button onClick={onClose} data-loc="class:cancel">
           取消
         </Button>
-        <Button type="primary" onClick={save} data-loc="class:apply">
+        <Button onClick={() => save(true)} title="存檔但留在編輯器(Ctrl+S)" data-loc="class:save">
+          儲存
+        </Button>
+        <Button type="primary" onClick={() => save(false)} data-loc="class:apply">
           套用
         </Button>
       </Space>

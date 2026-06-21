@@ -8,7 +8,7 @@
  *  畫布排版僅近似(mermaid 預覽會自行排版),序列化正確最重要。
  *  本元件較重(React Flow + dagre)→ 由上層以 lazy + Suspense 載入。
  */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -237,7 +237,7 @@ function GroupNode({ data, selected }: NodeProps) {
 
 interface Props {
   code: string;
-  onSave: (code: string) => void;
+  onSave: (code: string, opts?: { stay?: boolean }) => void;
   onClose: () => void;
   /** 滿版模式:撐滿父容器高度(由上層的全螢幕切換帶入)。 */
   fill?: boolean;
@@ -430,6 +430,9 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
   const [future, setFuture] = useState<Snap[]>([]);
   const clipboard = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null);
 
+  // saveRef:讓 window Ctrl+S 取到最新 save(save 定義在後且依賴 nodes/edges,避免 stale 閉包)。
+  const saveRef = useRef<(stay?: boolean) => void>(() => {});
+
   const takeSnapshot = useCallback(() => {
     setPast((p) => [...p.slice(-49), { nodes, edges }]);
     setFuture([]);
@@ -522,6 +525,18 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
     },
     [undo, redo, copy, paste],
   );
+
+  // Ctrl+S = 存檔但留在編輯器。綁 window(不限 canvas 焦點,點過工具列/Modal 也有效)。
+  useEffect(() => {
+    const onWinKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveRef.current(true);
+      }
+    };
+    window.addEventListener('keydown', onWinKey);
+    return () => window.removeEventListener('keydown', onWinKey);
+  }, []);
 
   const onNodesChange = useCallback(
     (c: NodeChange[]) => {
@@ -735,7 +750,7 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
     setEditEdge(null);
   };
 
-  const save = () => {
+  const save = (stay = false) => {
     // 端點所屬 group(parentId);用於驗證 {group} 修飾子是否合法。
     const groupOf = new Map(nodes.map((n) => [n.id, n.parentId ? String(n.parentId) : undefined]));
     const groups: ArchGroup[] = [];
@@ -786,8 +801,9 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
     });
 
     const model: ArchModel = { groups, services, junctions, edges: edgeList };
-    onSave(serializeArchitecture(model));
+    onSave(serializeArchitecture(model), { stay });
   };
+  saveRef.current = save; // 每次 render 更新,供 Ctrl+S 取最新
 
   // group Select 選項(自身不可當自己的 parent)。
   const groupOptions = useMemo(
@@ -914,7 +930,10 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
         <Button onClick={onClose} data-loc="arch:cancel">
           取消
         </Button>
-        <Button type="primary" onClick={save} data-loc="arch:apply">
+        <Button onClick={() => save(true)} title="存檔但留在編輯器(Ctrl+S)" data-loc="arch:save">
+          儲存
+        </Button>
+        <Button type="primary" onClick={() => save(false)} data-loc="arch:apply">
           套用
         </Button>
       </Space>

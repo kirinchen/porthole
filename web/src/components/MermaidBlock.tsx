@@ -5,11 +5,12 @@
  *  - mermaid 偏重 → 動態 import;FlowEditor(React Flow)→ lazy。
  *  - securityLevel='strict':渲染 repo 檔 / LLM 內容,擋 script / click 注入。
  */
-import { useEffect, useRef, useState, lazy, Suspense } from 'react';
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { Segmented, Input, Button, Space, Spin, Switch } from 'antd';
 import { FullscreenOutlined } from '@ant-design/icons';
 import type { SegmentedValue } from 'antd/es/segmented';
+import { markKeepGui, takeKeepGui } from '../lib/guiSession';
 import { isFlowchart } from '../lib/mermaidFlow';
 import { isStateDiagram } from '../lib/mermaidState';
 import { isErd } from '../lib/mermaidErd';
@@ -51,14 +52,18 @@ interface Props {
   code: string;
   /** 有給 → 可編輯(顯示 tab、套用寫回);沒給 → 純預覽。 */
   onApply?: (newCode: string) => void;
+  /** 跨 remount 保留 GUI 狀態的鍵(由 CM6 widget 傳入 lang:index);Chat 預覽不給。 */
+  sessionKey?: string;
 }
 
-export default function MermaidBlock({ code, onApply }: Props) {
+export default function MermaidBlock({ code, onApply, sessionKey }: Props) {
+  // remount 後若有 keep 標記 → 直接回 GUI(及全螢幕),支援「Ctrl+S 存檔但留在編輯器」。
+  const restored = useMemo(() => takeKeepGui(sessionKey), [sessionKey]);
   const ref = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>('preview');
+  const [mode, setMode] = useState<Mode>(restored ? 'gui' : 'preview');
   const [draft, setDraft] = useState(code);
-  const [guiFull, setGuiFull] = useState(false); // GUI 全螢幕(滿版覆蓋視窗)
+  const [guiFull, setGuiFull] = useState(restored?.full ?? false); // GUI 全螢幕(滿版覆蓋視窗)
 
   const editable = !!onApply;
   // GUI 可編輯的圖型(互斥,依標頭判定)
@@ -207,10 +212,19 @@ export default function MermaidBlock({ code, onApply }: Props) {
               <EditorComp
                 code={code}
                 fill={guiFull}
-                onSave={(c) => {
-                  onApply?.(c);
-                  setGuiFull(false);
-                  setMode('preview');
+                onSave={(c, opts) => {
+                  // stay(Ctrl+S / 儲存):寫回但留在 GUI。改寫文件會使本元件 remount,
+                  // 故先標記 sessionKey,讓 remount 後的新元件直接回到 GUI(及全螢幕)。
+                  if (opts?.stay) {
+                    if (sessionKey) markKeepGui(sessionKey, guiFull);
+                    onApply?.(c);
+                    // 觸發 Explore 存檔到磁碟(不退出編輯)。onApply 已同步更新 draft。
+                    if (sessionKey) window.dispatchEvent(new Event('porthole:save-file'));
+                  } else {
+                    onApply?.(c);
+                    setGuiFull(false);
+                    setMode('preview');
+                  }
                 }}
                 onClose={() => {
                   setGuiFull(false);

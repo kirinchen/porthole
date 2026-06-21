@@ -16,7 +16,7 @@
  *
  *  本元件較重(React Flow + dagre)→ 由上層以 lazy + Suspense 載入。
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -203,7 +203,8 @@ function GroupNode({ data, selected }: NodeProps) {
 
 interface Props {
   code: string;
-  onSave: (code: string) => void;
+  /** opts.stay=true:寫回但留在 GUI(Ctrl+S / 儲存);否則寫回並回 preview(套用)。 */
+  onSave: (code: string, opts?: { stay?: boolean }) => void;
   onClose: () => void;
   /** 滿版模式:撐滿父容器高度(由上層全螢幕切換帶入)。 */
   fill?: boolean;
@@ -458,6 +459,9 @@ export default function D2Editor({ code, onSave, onClose, fill }: Props) {
     setEdges(next.edges);
   }, [future, nodes, edges]);
 
+  // saveRef:讓 onKeyDown 取到最新 save(save 定義在後且依賴 nodes/edges,避免 stale 閉包)。
+  const saveRef = useRef<(stay?: boolean) => void>(() => {});
+
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -472,6 +476,18 @@ export default function D2Editor({ code, onSave, onClose, fill }: Props) {
     },
     [undo, redo],
   );
+
+  // Ctrl+S = 存檔但留在編輯器。綁 window(不限 canvas 焦點,點過工具列/Modal 也有效)。
+  useEffect(() => {
+    const onWinKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveRef.current(true);
+      }
+    };
+    window.addEventListener('keydown', onWinKey);
+    return () => window.removeEventListener('keydown', onWinKey);
+  }, []);
 
   const onNodesChange = useCallback(
     (c: NodeChange[]) => {
@@ -651,7 +667,7 @@ export default function D2Editor({ code, onSave, onClose, fill }: Props) {
    *  - edges 由 node.id(= fullId)取 from/to + data.arrow/label。
    *  - 序列化前再次過濾 D2 非法邊(自連 / container↔後代 / 端點不存在)。
    */
-  const save = () => {
+  const save = (stay = false) => {
     // 統一重建 fullId(確保 node.id 與 edges 端點一致)。
     const map = rebuildFullIds(nodes);
     const { nodes: fnodes, edges: fedges } = applyFullIds(nodes, edges, map);
@@ -680,8 +696,9 @@ export default function D2Editor({ code, onSave, onClose, fill }: Props) {
     });
 
     const model: D2Model = { nodes: d2nodes, edges: d2edges };
-    onSave(serializeD2(model));
+    onSave(serializeD2(model), { stay });
   };
+  saveRef.current = save; // 每次 render 更新,供 Ctrl+S 取最新
 
   // container Select 選項(自身不可當自己的 parent;亦排除自己的後代,避免造環)。
   const containerOptions = useMemo(() => {
@@ -796,7 +813,10 @@ export default function D2Editor({ code, onSave, onClose, fill }: Props) {
         <Button onClick={onClose} data-loc="d2:cancel">
           取消
         </Button>
-        <Button type="primary" onClick={save} data-loc="d2:apply">
+        <Button onClick={() => save(true)} title="存檔但留在編輯器(Ctrl+S)" data-loc="d2:save">
+          儲存
+        </Button>
+        <Button type="primary" onClick={() => save(false)} data-loc="d2:apply">
           套用
         </Button>
       </Space>

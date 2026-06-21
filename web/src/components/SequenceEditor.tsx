@@ -6,7 +6,7 @@
  *  - 「套用」→ serializeSequence → onSave(正規化 mermaid 文字);「取消」→ onClose。
  *  本元件輕量(純表單)→ 可由上層以 lazy + Suspense 載入。
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Input, Select, Space, Switch, Typography, List } from 'antd';
 import {
   PlusOutlined,
@@ -38,7 +38,7 @@ const ARROW_OPTS: { value: SeqArrow; label: string }[] = [
 
 interface Props {
   code: string;
-  onSave: (code: string) => void;
+  onSave: (code: string, opts?: { stay?: boolean }) => void;
   onClose: () => void;
   /** 滿版模式:撐滿父容器高度(由上層的全螢幕切換帶入)。 */
   fill?: boolean;
@@ -114,6 +114,9 @@ export default function SequenceEditor({ code, onSave, onClose, fill }: Props) {
     setMessages(next.messages);
   }, [future, participants, messages]);
 
+  // saveRef:讓 window Ctrl+S 取到最新 save(save 定義在後且依賴 participants/messages,避免 stale 閉包)。
+  const saveRef = useRef<(stay?: boolean) => void>(() => {});
+
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -128,6 +131,18 @@ export default function SequenceEditor({ code, onSave, onClose, fill }: Props) {
     },
     [undo, redo],
   );
+
+  // Ctrl+S = 存檔但留在編輯器。綁 window(不限焦點,點過工具列也有效)。
+  useEffect(() => {
+    const onWinKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveRef.current(true);
+      }
+    };
+    window.addEventListener('keydown', onWinKey);
+    return () => window.removeEventListener('keydown', onWinKey);
+  }, []);
 
   // ── 參與者操作 ─────────────────────────────────────────────
   const addParticipant = () => {
@@ -204,7 +219,7 @@ export default function SequenceEditor({ code, onSave, onClose, fill }: Props) {
     [participants],
   );
 
-  const save = () => {
+  const save = (stay = false) => {
     // 清掉沒填 id 的空白參與者列;訊息端點 trim。
     const cleanParticipants = participants
       .map<SeqParticipant>((p) => ({
@@ -226,8 +241,9 @@ export default function SequenceEditor({ code, onSave, onClose, fill }: Props) {
       // 兩端皆須為已存在的參與者(避免序列化出空端點)。
       .filter((m) => m.from && m.to && validIds.has(m.from) && validIds.has(m.to));
     const model: SeqModel = { participants: cleanParticipants, messages: cleanMessages };
-    onSave(serializeSequence(model));
+    onSave(serializeSequence(model), { stay });
   };
+  saveRef.current = save; // 每次 render 更新,供 Ctrl+S 取最新
 
   return (
     <div
@@ -439,7 +455,10 @@ export default function SequenceEditor({ code, onSave, onClose, fill }: Props) {
         <Button onClick={onClose} data-loc="seq:cancel">
           取消
         </Button>
-        <Button type="primary" onClick={save} data-loc="seq:apply">
+        <Button onClick={() => save(true)} title="存檔但留在編輯器(Ctrl+S)" data-loc="seq:save">
+          儲存
+        </Button>
+        <Button type="primary" onClick={() => save(false)} data-loc="seq:apply">
           套用
         </Button>
       </Space>

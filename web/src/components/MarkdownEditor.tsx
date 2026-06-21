@@ -105,6 +105,8 @@ class FenceWidget extends WidgetType {
       createElement(FENCE_COMPONENT[this.lang], {
         code: this.code,
         onApply: (nc: string) => applyFenceBlock(view, this.lang, this.index, nc),
+        // 跨 remount 保留 GUI 狀態:存檔改寫文件 → widget 重建 → 元件 remount。
+        sessionKey: `${this.lang}:${this.index}`,
       }),
     );
     (dom as unknown as { _root: Root })._root = root;

@@ -14,7 +14,7 @@
  *
  *  本元件較重(React Flow + dagre)→ 由上層以 lazy + Suspense 載入。
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -173,7 +173,7 @@ function MindmapNodeView({ data }: NodeProps) {
 
 interface Props {
   code: string;
-  onSave: (code: string) => void;
+  onSave: (code: string, opts?: { stay?: boolean }) => void;
   onClose: () => void;
   /** 滿版模式:撐滿父容器高度(由上層全螢幕切換帶入)。 */
   fill?: boolean;
@@ -347,6 +347,21 @@ export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
     [undo, redo],
   );
 
+  // saveRef:讓 window Ctrl+S 取到最新 save(save 定義在後且依賴 nodes/edges,避免 stale 閉包)。
+  const saveRef = useRef<(stay?: boolean) => void>(() => {});
+
+  // Ctrl+S = 存檔但留在編輯器。綁 window(不限 canvas 焦點,點過工具列/Modal 也有效)。
+  useEffect(() => {
+    const onWinKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveRef.current(true);
+      }
+    };
+    window.addEventListener('keydown', onWinKey);
+    return () => window.removeEventListener('keydown', onWinKey);
+  }, []);
+
   // 選取節點 id(用於「新增子 / 兄弟 / 刪除」)。
   const selectedId = useMemo(() => nodes.find((n) => n.selected)?.id, [nodes]);
   const rootId = useMemo(() => findRootId(nodes, edges), [nodes, edges]);
@@ -512,7 +527,7 @@ export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
    *    不該出現)一律掛回 root 之下,保證恰好一個 root。
    *  - 用 BFS 從 root 走出節點順序(parent 先於 child),helps serializeMindmap 縮排正確。
    */
-  const save = useCallback(() => {
+  const save = useCallback((stay = false) => {
     const parentMap = buildParentMap(edges);
     const idSet = new Set(nodes.map((n) => n.id));
     // 端點不存在的邊不計入(理論上不會,刪節點已清邊)。
@@ -525,7 +540,7 @@ export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
     const noParent = nodes.filter((n) => !cleanParent.has(n.id));
     const rootNode = noParent[0] ?? nodes[0];
     if (!rootNode) {
-      onSave(serializeMindmap({ nodes: [] }));
+      onSave(serializeMindmap({ nodes: [] }), { stay });
       return;
     }
     // 多餘的無 parent 節點 → 掛回 root,保證單 root。
@@ -576,8 +591,9 @@ export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
     });
 
     const model: MindmapModel = { nodes: mmNodes };
-    onSave(serializeMindmap(model));
+    onSave(serializeMindmap(model), { stay });
   }, [nodes, edges, onSave]);
+  saveRef.current = save; // 每次 render 更新,供 Ctrl+S 取最新
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: fill ? '100%' : '70vh' }}>
@@ -665,7 +681,10 @@ export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
         <Button onClick={onClose} data-loc="mindmap:cancel">
           取消
         </Button>
-        <Button type="primary" onClick={save} data-loc="mindmap:apply">
+        <Button onClick={() => save(true)} title="存檔但留在編輯器(Ctrl+S)" data-loc="mindmap:save">
+          儲存
+        </Button>
+        <Button type="primary" onClick={() => save(false)} data-loc="mindmap:apply">
           套用
         </Button>
       </Space>

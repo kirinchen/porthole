@@ -12,6 +12,7 @@
 import {
   createContext,
   useContext,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -190,6 +191,13 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+  // draftRef:同步保存最新內容,供 window 'porthole:save-file' 事件(GUI Ctrl+S)即時存檔,
+  // 不受 React state 非同步影響(CM6 onChange 同步更新此 ref)。
+  const draftRef = useRef('');
+  const setDraftSync = useCallback((v: string) => {
+    draftRef.current = v;
+    setDraft(v);
+  }, []);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -268,7 +276,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
 
   const startEdit = () => {
     if (!sel) return;
-    setDraft(sel.content);
+    setDraftSync(sel.content);
     setSaveErr(null);
     setNote(null);
     setEditing(true);
@@ -298,6 +306,29 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     }
   };
 
+  // GUI 編輯器 Ctrl+S / 儲存:dispatch window 'porthole:save-file' → 存到磁碟但「不退出編輯」
+  // (與 save() 不同,save() 會 setEditing(false))。讀 draftRef 取最新內容(避免 state 非同步)。
+  useEffect(() => {
+    if (!editing || !sel) return;
+    const onSaveFile = () => {
+      void (async () => {
+        setSaving(true);
+        setSaveErr(null);
+        try {
+          await api.writeFile(repo, sel.path, draftRef.current);
+          setSel({ path: sel.path, content: draftRef.current, markdown: sel.markdown, isNew: false });
+          setNote(`已儲存 ${sel.path}`);
+        } catch (e) {
+          setSaveErr((e as Error).message);
+        } finally {
+          setSaving(false);
+        }
+      })();
+    };
+    window.addEventListener('porthole:save-file', onSaveFile);
+    return () => window.removeEventListener('porthole:save-file', onSaveFile);
+  }, [editing, sel, repo]);
+
   // 重新整理:重載樹;若有開啟檔且非編輯中,重抓內容(看 agent 改後的結果)。
   const refresh = () => {
     reloadTree();
@@ -323,7 +354,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setSaveErr(null);
     setSel({ path: p, content: '', markdown: isMd(p), isNew: true });
     setSelPath(p);
-    setDraft('');
+    setDraftSync('');
     setEditing(true);
   };
 
@@ -423,7 +454,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setDrawerOpen,
     editing,
     draft,
-    setDraft,
+    setDraft: setDraftSync,
     saving,
     saveErr,
     note,

@@ -5,7 +5,7 @@
  *  - 「套用」→ serializeFlow → onSave(正規化 mermaid 文字)。
  *  本元件較重(React Flow + dagre)→ 由 Explore 以 lazy + Suspense 載入。
  */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -78,7 +78,7 @@ function ShapedNode({ data }: NodeProps) {
 
 interface Props {
   code: string;
-  onSave: (code: string) => void;
+  onSave: (code: string, opts?: { stay?: boolean }) => void;
   onClose: () => void;
   /** 滿版模式:撐滿父容器高度(由 MermaidBlock 的全螢幕切換帶入)。 */
   fill?: boolean;
@@ -138,6 +138,9 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
   const [future, setFuture] = useState<Snap[]>([]);
   const clipboard = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null);
 
+  // saveRef:讓 window Ctrl+S 取到最新 save(save 定義在後且依賴 nodes/edges,避免 stale 閉包)。
+  const saveRef = useRef<(stay?: boolean) => void>(() => {});
+
   // 在「變動之前」呼叫:把當前狀態推進 past、清空 future(上限 50)。
   const takeSnapshot = useCallback(() => {
     setPast((p) => [...p.slice(-49), { nodes, edges, dir }]);
@@ -163,6 +166,18 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
     setEdges(next.edges);
     setDir(next.dir);
   }, [future, nodes, edges, dir]);
+
+  // Ctrl+S = 存檔但留在編輯器。綁 window(不限 canvas 焦點,點過工具列/Modal 也有效)。
+  useEffect(() => {
+    const onWinKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveRef.current(true);
+      }
+    };
+    window.addEventListener('keydown', onWinKey);
+    return () => window.removeEventListener('keydown', onWinKey);
+  }, []);
 
   const copy = useCallback(() => {
     const sel = nodes.filter((n) => n.selected);
@@ -296,7 +311,7 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
     setEditEdge(null);
   };
 
-  const save = () => {
+  const save = (stay = false) => {
     const g: FlowGraph = {
       dir,
       nodes: nodes.map((n) => ({
@@ -310,8 +325,9 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
         label: e.label ? String(e.label) : undefined,
       })),
     };
-    onSave(serializeFlow(g));
+    onSave(serializeFlow(g), { stay });
   };
+  saveRef.current = save; // 每次 render 更新,供 Ctrl+S 取最新
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: fill ? '100%' : '70vh' }}>
@@ -384,7 +400,10 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
 
       <Space style={{ marginTop: 8, justifyContent: 'flex-end' }}>
         <Button onClick={onClose}>取消</Button>
-        <Button type="primary" onClick={save} data-loc="flow:apply">
+        <Button onClick={() => save(true)} title="存檔但留在編輯器(Ctrl+S)" data-loc="flow:save">
+          儲存
+        </Button>
+        <Button type="primary" onClick={() => save(false)} data-loc="flow:apply">
           套用
         </Button>
       </Space>
