@@ -16,6 +16,7 @@ import { isErd } from '../lib/mermaidErd';
 import { isClassDiagram } from '../lib/mermaidClass';
 import { isSequence } from '../lib/mermaidSequence';
 import { isArchitecture } from '../lib/mermaidArchitecture';
+import { isMindmap } from '../lib/mermaidMindmap';
 
 const FlowEditor = lazy(() => import('./FlowEditor'));
 const StateEditor = lazy(() => import('./StateEditor'));
@@ -23,6 +24,7 @@ const ErdEditor = lazy(() => import('./ErdEditor'));
 const ClassEditor = lazy(() => import('./ClassEditor'));
 const SequenceEditor = lazy(() => import('./SequenceEditor'));
 const ArchitectureEditor = lazy(() => import('./ArchitectureEditor'));
+const MindmapEditor = lazy(() => import('./MindmapEditor'));
 
 type Mode = 'preview' | 'edit' | 'gui';
 
@@ -60,7 +62,7 @@ export default function MermaidBlock({ code, onApply }: Props) {
 
   const editable = !!onApply;
   // GUI 可編輯的圖型(互斥,依標頭判定)
-  const guiKind: 'flow' | 'state' | 'erd' | 'class' | 'sequence' | 'arch' | null = isFlowchart(code)
+  const guiKind: 'flow' | 'state' | 'erd' | 'class' | 'sequence' | 'arch' | 'mindmap' | null = isFlowchart(code)
     ? 'flow'
     : isStateDiagram(code)
       ? 'state'
@@ -72,7 +74,9 @@ export default function MermaidBlock({ code, onApply }: Props) {
             ? 'sequence'
             : isArchitecture(code)
               ? 'arch'
-              : null;
+              : isMindmap(code)
+                ? 'mindmap'
+                : null;
 
   useEffect(() => {
     if (mode !== 'preview') return;
@@ -195,7 +199,9 @@ export default function MermaidBlock({ code, onApply }: Props) {
                     ? SequenceEditor
                     : guiKind === 'arch'
                       ? ArchitectureEditor
-                      : FlowEditor;
+                      : guiKind === 'mindmap'
+                        ? MindmapEditor
+                        : FlowEditor;
           const editor = (
             <Suspense fallback={<Spin />}>
               <EditorComp

@@ -1,0 +1,728 @@
+/**
+ * MindmapEditor — mermaid `mindmap` 圖型的樹狀 GUI 編輯器(React Flow + dagre 排版)。
+ *  以 D2Editor / ArchitectureEditor 為藍本,但 mindmap 是「單 root 嚴格樹」:
+ *   - 每個 MindmapNode → 一個 RF node(node.id = MindmapNode.key);階層「用邊表達」
+ *     (mindmap 非巢狀容器,故不用 parentId,改以 parent.key → child.key 的無箭頭邊)。
+ *   - 自訂節點:方框顯示 text(角落小字顯示 shape / icon);四邊各 source+target Handle。
+ *   - double-click 節點 → 改 text / shape / icon / class;按鈕新增子節點 / 兄弟節點。
+ *   - 拖把手連線 = 「改 parent」:把 target 的既有 incoming 邊換成 source→target 的新邊。
+ *   - Delete 刪選取節點 + 整個子樹;root 不可刪。
+ *
+ *  單 root 不變式:mindmap 只能有一個 root(無 incoming 邊的節點)。所有操作後都要
+ *  恰好一個 root。改 parent 時防環(source 不可是 target 的後代)、且不可把 root 變成
+ *  自己子樹的子節點(會變兩 root 或環)。存檔時若殘留多個無 parent,把多餘的掛回 root。
+ *
+ *  本元件較重(React Flow + dagre)→ 由上層以 lazy + Suspense 載入。
+ */
+import { useCallback, useMemo, useState } from 'react';
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  Handle,
+  Position,
+  addEdge,
+  applyNodeChanges,
+  applyEdgeChanges,
+  type Node,
+  type Edge,
+  type Connection,
+  type NodeChange,
+  type EdgeChange,
+  type NodeProps,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
+import dagre from '@dagrejs/dagre';
+import { Button, Modal, Input, Select, Space, Typography, message } from 'antd';
+import {
+  PlusOutlined,
+  UndoOutlined,
+  RedoOutlined,
+  ApartmentOutlined,
+  BranchesOutlined,
+} from '@ant-design/icons';
+import {
+  parseMindmap,
+  serializeMindmap,
+  MINDMAP_SHAPE_LABELS,
+  type MindmapShape,
+  type MindmapModel,
+  type MindmapNode,
+} from '../lib/mermaidMindmap';
+
+/** 側邊 ∈ L/R/T/B(沿用 D2Editor 的 handle 命名 s-<SIDE> / t-<SIDE>)。 */
+type Side = 'L' | 'R' | 'T' | 'B';
+const SIDES: Side[] = ['L', 'R', 'T', 'B'];
+
+const SHAPE_OPTS: { value: MindmapShape; label: string }[] = (
+  Object.keys(MINDMAP_SHAPE_LABELS) as MindmapShape[]
+).map((s) => ({ value: s, label: MINDMAP_SHAPE_LABELS[s] }));
+
+const NODE_W = 140;
+const NODE_H = 56;
+
+/** Side → React Flow Position。 */
+function sidePos(s: Side): Position {
+  switch (s) {
+    case 'L':
+      return Position.Left;
+    case 'R':
+      return Position.Right;
+    case 'T':
+      return Position.Top;
+    case 'B':
+      return Position.Bottom;
+  }
+}
+
+/** node.data 形狀:對應 MindmapNode 的可編欄位(parent 由邊表達,不存這裡)。 */
+type MindmapNodeData = {
+  text: string;
+  shape: MindmapShape;
+  icon?: string;
+  cls?: string;
+  /** mermaid id 前綴(round-trip 用)。 */
+  mid?: string;
+  /** 是否為 root(視覺加粗 / 換色;非 SSoT,SSoT 是「無 incoming 邊」)。 */
+  isRoot?: boolean;
+};
+
+/** 四邊各放 source+target Handle(任意側邊都能拖出 / 落下 = 改 parent)。 */
+function FourSideHandles({ color }: { color: string }) {
+  return (
+    <>
+      {SIDES.map((s) => (
+        <span key={s}>
+          <Handle
+            id={`t-${s}`}
+            type="target"
+            position={sidePos(s)}
+            style={{ background: color, width: 9, height: 9, zIndex: 10 }}
+          />
+          <Handle
+            id={`s-${s}`}
+            type="source"
+            position={sidePos(s)}
+            style={{ background: color, width: 9, height: 9, zIndex: 10 }}
+          />
+        </span>
+      ))}
+    </>
+  );
+}
+
+/** 自訂節點:方框 + text;角落小字顯示 shape / icon;root 加粗換色。 */
+function MindmapNodeView({ data }: NodeProps) {
+  const d = data as MindmapNodeData;
+  const root = !!d.isRoot;
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: NODE_W,
+        height: NODE_H,
+        border: root ? '2px solid #1677ff' : '1px solid #555',
+        borderRadius: 8,
+        background: root ? '#e6f4ff' : '#fff',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 12,
+        fontWeight: root ? 700 : 600,
+        boxSizing: 'border-box',
+        padding: '0 8px',
+        textAlign: 'center',
+        overflow: 'hidden',
+      }}
+    >
+      <span
+        style={{
+          maxWidth: '100%',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        {d.text || <span style={{ color: '#aaa' }}>(空白)</span>}
+      </span>
+      {/* 角落小字:shape 名稱 + icon(若有)。 */}
+      <span
+        style={{
+          position: 'absolute',
+          bottom: 2,
+          right: 6,
+          fontSize: 9,
+          fontWeight: 400,
+          color: '#999',
+          pointerEvents: 'none',
+          maxWidth: '90%',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        {d.shape !== 'default' ? d.shape : ''}
+        {d.icon ? ` · ${d.icon}` : ''}
+      </span>
+      <FourSideHandles color={root ? '#1677ff' : '#555'} />
+    </div>
+  );
+}
+
+interface Props {
+  code: string;
+  onSave: (code: string) => void;
+  onClose: () => void;
+  /** 滿版模式:撐滿父容器高度(由上層全螢幕切換帶入)。 */
+  fill?: boolean;
+}
+
+type Snap = { nodes: Node[]; edges: Edge[] };
+
+/** 由 edges 建「child.id → parent.id」對照(每個節點至多一條 incoming 邊)。 */
+function buildParentMap(edges: Edge[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const e of edges) m.set(e.target, e.source);
+  return m;
+}
+
+/**
+ * 沿 parent 鏈判斷 a 是否為 b 的祖先(含 a===b)。byParent: childId → parentId。
+ * 用於改 parent 防環(類似 D2Editor.isAncestor)。
+ */
+function isAncestor(a: string, b: string, byParent: Map<string, string>): boolean {
+  let cur: string | undefined = b;
+  const seen = new Set<string>();
+  while (cur !== undefined && !seen.has(cur)) {
+    if (cur === a) return true;
+    seen.add(cur);
+    cur = byParent.get(cur);
+  }
+  return false;
+}
+
+/** 找 root:無 incoming 邊的節點 id(理論上恰一個)。 */
+function findRootId(nodes: Node[], edges: Edge[]): string | undefined {
+  const hasIncoming = new Set(edges.map((e) => e.target));
+  return nodes.find((n) => !hasIncoming.has(n.id))?.id;
+}
+
+/** 從 root 起 BFS 收集子樹所有節點 id(含 root 自身)。byParent: childId → parentId。 */
+function collectSubtree(rootId: string, edges: Edge[]): Set<string> {
+  const children = new Map<string, string[]>();
+  for (const e of edges) {
+    if (!children.has(e.source)) children.set(e.source, []);
+    children.get(e.source)!.push(e.target);
+  }
+  const out = new Set<string>([rootId]);
+  const queue = [rootId];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    for (const c of children.get(cur) ?? []) {
+      if (!out.has(c)) {
+        out.add(c);
+        queue.push(c);
+      }
+    }
+  }
+  return out;
+}
+
+/** dagre 樹狀排版(LR,像心智圖);節點 + 邊都進 dagre 算座標。 */
+function layout(nodes: Node[], edges: Edge[]): Node[] {
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir: 'LR', nodesep: 32, ranksep: 80 });
+  g.setDefaultEdgeLabel(() => ({}));
+  const ids = new Set(nodes.map((n) => n.id));
+  nodes.forEach((n) => g.setNode(n.id, { width: NODE_W, height: NODE_H }));
+  edges.forEach((e) => {
+    if (ids.has(e.source) && ids.has(e.target)) g.setEdge(e.source, e.target);
+  });
+  dagre.layout(g);
+  return nodes.map((n) => {
+    const p = g.node(n.id);
+    if (!p) return n;
+    return { ...n, position: { x: p.x - NODE_W / 2, y: p.y - NODE_H / 2 } };
+  });
+}
+
+/** 建一條階層邊(無箭頭、無 label、無 markerEnd)。handle 可帶入拖出/落下的實際側邊。 */
+function makeEdge(source: string, target: string, seq: number, sh?: string | null, th?: string | null): Edge {
+  return {
+    id: `me-${source}-${target}-${seq}`,
+    source,
+    target,
+    sourceHandle: sh ?? 's-R',
+    targetHandle: th ?? 't-L',
+  };
+}
+
+export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
+  const nodeTypes = useMemo(() => ({ mindmap: MindmapNodeView }), []);
+
+  const init = useMemo(() => {
+    const model = parseMindmap(code);
+    const rootKey = model.nodes[0]?.key;
+
+    const rfNodes: Node[] = model.nodes.map((n) => {
+      const data: MindmapNodeData = {
+        text: n.text,
+        shape: n.shape,
+        icon: n.icon,
+        cls: n.cls,
+        mid: n.mid,
+        isRoot: n.key === rootKey,
+      };
+      return {
+        id: n.key,
+        type: 'mindmap',
+        data,
+        position: { x: 0, y: 0 },
+        style: { width: NODE_W, height: NODE_H },
+      };
+    });
+
+    // 階層用邊表達:對每個有 parent 的節點建一條 parent.key → child.key 邊。
+    const rfEdges: Edge[] = model.nodes
+      .filter((n) => n.parent !== undefined)
+      .map((n, i) => makeEdge(n.parent as string, n.key, i));
+
+    return { nodes: layout(rfNodes, rfEdges), edges: rfEdges };
+  }, [code]);
+
+  const [nodes, setNodes] = useState<Node[]>(init.nodes);
+  const [edges, setEdges] = useState<Edge[]>(init.edges);
+  const [seq, setSeq] = useState(1);
+
+  // 雙擊編輯節點。
+  const [editNode, setEditNode] = useState<{
+    id: string;
+    text: string;
+    shape: MindmapShape;
+    icon: string;
+    cls: string;
+  } | null>(null);
+
+  // 復原 / 重做快照堆疊。
+  const [past, setPast] = useState<Snap[]>([]);
+  const [future, setFuture] = useState<Snap[]>([]);
+
+  const takeSnapshot = useCallback(() => {
+    setPast((p) => [...p.slice(-49), { nodes, edges }]);
+    setFuture([]);
+  }, [nodes, edges]);
+
+  const undo = useCallback(() => {
+    if (!past.length) return;
+    const prev = past[past.length - 1];
+    setFuture((f) => [{ nodes, edges }, ...f]);
+    setPast((p) => p.slice(0, -1));
+    setNodes(prev.nodes);
+    setEdges(prev.edges);
+  }, [past, nodes, edges]);
+
+  const redo = useCallback(() => {
+    if (!future.length) return;
+    const next = future[0];
+    setPast((p) => [...p, { nodes, edges }]);
+    setFuture((f) => f.slice(1));
+    setNodes(next.nodes);
+    setEdges(next.edges);
+  }, [future, nodes, edges]);
+
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if (k === 'y' || (k === 'z' && e.shiftKey)) {
+        e.preventDefault();
+        redo();
+      }
+    },
+    [undo, redo],
+  );
+
+  // 選取節點 id(用於「新增子 / 兄弟 / 刪除」)。
+  const selectedId = useMemo(() => nodes.find((n) => n.selected)?.id, [nodes]);
+  const rootId = useMemo(() => findRootId(nodes, edges), [nodes, edges]);
+
+  /**
+   * 節點刪除:Delete/Backspace 觸發。攔截 remove change,改為刪「選取節點 + 整個子樹」,
+   * 並擋掉 root(root 不可刪)。邊的 remove 照常套用(applyEdgeChanges)。
+   */
+  const onNodesChange = useCallback(
+    (c: NodeChange[]) => {
+      const removeIds = c.flatMap((x) => (x.type === 'remove' ? [x.id] : []));
+      if (removeIds.length) {
+        // root 不可刪:從刪除集合濾掉 root(而非整批拒絕),其餘照刪。
+        const delIds = rootId !== undefined ? removeIds.filter((id) => id !== rootId) : removeIds;
+        if (delIds.length < removeIds.length) message.warning('root 不可刪除,已略過');
+        const rest = c.filter((x) => x.type !== 'remove');
+        if (!delIds.length) {
+          if (rest.length) setNodes((n) => applyNodeChanges(rest, n));
+          return;
+        }
+        takeSnapshot();
+        // 展開為「子樹」一併刪除。
+        const toDelete = new Set<string>();
+        for (const id of delIds) for (const s of collectSubtree(id, edges)) toDelete.add(s);
+        setNodes((n) => n.filter((x) => !toDelete.has(x.id)));
+        setEdges((es) => es.filter((e) => !toDelete.has(e.source) && !toDelete.has(e.target)));
+        // 套用其餘非 remove 變更。
+        if (rest.length) setNodes((n) => applyNodeChanges(rest, n));
+        return;
+      }
+      setNodes((n) => applyNodeChanges(c, n));
+    },
+    [edges, rootId, takeSnapshot],
+  );
+
+  const onEdgesChange = useCallback(
+    (c: EdgeChange[]) => {
+      if (c.some((x) => x.type === 'remove')) takeSnapshot();
+      setEdges((e) => applyEdgeChanges(c, e));
+    },
+    [takeSnapshot],
+  );
+
+  /**
+   * 拖把手連線 = 改 parent:把 target 的 parent 改成 source。
+   *  - 先移除 target 既有的 incoming 邊,再加 source → target 的新邊。
+   *  - 防環:source 不可是 target 的後代(否則成環)。
+   *  - 防多 root / 環:target 不可是 root(root 被指 parent 會多一個 root 之外又無法回頭,
+   *    其實是「root 變成自己子樹的子節點」→ 兩 root 或環)→ 禁止並提示。
+   *  - 自連(source===target)禁止。
+   */
+  const onConnect = useCallback(
+    (c: Connection) => {
+      if (!c.source || !c.target) return;
+      if (c.source === c.target) {
+        message.warning('不可把節點連到自己');
+        return;
+      }
+      // target 是 root → 改它的 parent 會讓 root 變成子節點(原本無 incoming),
+      // 進而產生第二個 root 或環。禁止。
+      if (c.target === rootId) {
+        message.warning('不可改 root 的 parent(mindmap 只能有一個 root)');
+        return;
+      }
+      const byParent = buildParentMap(edges);
+      // 防環:source 不可是 target 的後代(含 target 自己)。
+      if (isAncestor(c.target, c.source, byParent)) {
+        message.warning('不可把節點掛到自己的子孫底下(會形成環)');
+        return;
+      }
+      takeSnapshot();
+      const s = seq;
+      setSeq(s + 1);
+      // 先移除 target 既有 incoming 邊,再加新邊 → 維持「每節點至多一條 incoming」。
+      setEdges((es) =>
+        addEdge(makeEdge(c.source!, c.target!, s, c.sourceHandle, c.targetHandle), es.filter((e) => e.target !== c.target)),
+      );
+    },
+    [edges, rootId, seq, takeSnapshot],
+  );
+
+  const reLayout = () => setNodes((n) => layout(n, edges));
+
+  /** 產生不重複的新節點 id。 */
+  const newNodeId = useCallback(
+    (start: number): { id: string; next: number } => {
+      const used = new Set(nodes.map((n) => n.id));
+      let s = start;
+      let id = `m_${s++}`;
+      while (used.has(id)) id = `m_${s++}`;
+      return { id, next: s };
+    },
+    [nodes],
+  );
+
+  /** 新增子節點(對選取節點;沒選取則對 root)。 */
+  const addChild = useCallback(() => {
+    const parent = selectedId ?? rootId;
+    if (parent === undefined) {
+      message.warning('沒有可作為 parent 的節點');
+      return;
+    }
+    takeSnapshot();
+    const { id, next } = newNodeId(seq);
+    setSeq(next + 1);
+    const data: MindmapNodeData = { text: '', shape: 'default', isRoot: false };
+    setNodes((n) => [
+      ...n,
+      { id, type: 'mindmap', data, position: { x: 0, y: 0 }, style: { width: NODE_W, height: NODE_H } },
+    ]);
+    setEdges((es) => [...es, makeEdge(parent, id, next)]);
+  }, [selectedId, rootId, seq, newNodeId, takeSnapshot]);
+
+  /** 新增兄弟(加到選取節點的 parent 之下;root 無 parent → 退化成加 child)。 */
+  const addSibling = useCallback(() => {
+    if (selectedId === undefined) {
+      message.warning('請先選取一個節點');
+      return;
+    }
+    const byParent = buildParentMap(edges);
+    const parent = byParent.get(selectedId);
+    if (parent === undefined) {
+      // 選取的是 root(無 parent)→ root 不能有兄弟(會變兩 root)→ 退化成加 child。
+      message.info('root 無 parent,改為新增子節點');
+      addChild();
+      return;
+    }
+    takeSnapshot();
+    const { id, next } = newNodeId(seq);
+    setSeq(next + 1);
+    const data: MindmapNodeData = { text: '', shape: 'default', isRoot: false };
+    setNodes((n) => [
+      ...n,
+      { id, type: 'mindmap', data, position: { x: 0, y: 0 }, style: { width: NODE_W, height: NODE_H } },
+    ]);
+    setEdges((es) => [...es, makeEdge(parent, id, next)]);
+  }, [selectedId, edges, seq, newNodeId, addChild, takeSnapshot]);
+
+  /** 套用節點編輯:text / shape / icon / class。 */
+  const applyNode = useCallback(() => {
+    if (!editNode) return;
+    takeSnapshot();
+    setNodes((ns) =>
+      ns.map((n) => {
+        if (n.id !== editNode.id) return n;
+        const data: MindmapNodeData = {
+          ...(n.data as MindmapNodeData),
+          text: editNode.text,
+          shape: editNode.shape,
+          icon: editNode.icon.trim() || undefined,
+          cls: editNode.cls.trim() || undefined,
+        };
+        return { ...n, data };
+      }),
+    );
+    setEditNode(null);
+  }, [editNode, takeSnapshot]);
+
+  /**
+   * 存檔:React Flow → MindmapModel → serializeMindmap → onSave。
+   *  - 每個 node 的 parent = 其 incoming 邊的 source(無 incoming = root)。
+   *  - 維持單 root:取「第一個無 parent 者」當 root,排到最前;其餘無 parent 者(理論上
+   *    不該出現)一律掛回 root 之下,保證恰好一個 root。
+   *  - 用 BFS 從 root 走出節點順序(parent 先於 child),helps serializeMindmap 縮排正確。
+   */
+  const save = useCallback(() => {
+    const parentMap = buildParentMap(edges);
+    const idSet = new Set(nodes.map((n) => n.id));
+    // 端點不存在的邊不計入(理論上不會,刪節點已清邊)。
+    const cleanParent = new Map<string, string>();
+    for (const [child, parent] of parentMap) {
+      if (idSet.has(child) && idSet.has(parent)) cleanParent.set(child, parent);
+    }
+
+    // 無 parent 的節點(候選 root)。
+    const noParent = nodes.filter((n) => !cleanParent.has(n.id));
+    const rootNode = noParent[0] ?? nodes[0];
+    if (!rootNode) {
+      onSave(serializeMindmap({ nodes: [] }));
+      return;
+    }
+    // 多餘的無 parent 節點 → 掛回 root,保證單 root。
+    const extraRoots = new Set(noParent.slice(1).map((n) => n.id));
+
+    const effParent = (id: string): string | undefined => {
+      if (id === rootNode.id) return undefined;
+      if (extraRoots.has(id)) return rootNode.id; // 多餘 root 掛回 root
+      return cleanParent.get(id);
+    };
+
+    // BFS 從 root 走,確保 parent 先於 child(順序非強制,但 root 必為第一個無 parent 者)。
+    const children = new Map<string, string[]>();
+    for (const n of nodes) {
+      const p = effParent(n.id);
+      if (p !== undefined) {
+        if (!children.has(p)) children.set(p, []);
+        children.get(p)!.push(n.id);
+      }
+    }
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const ordered: Node[] = [];
+    const seen = new Set<string>();
+    const queue = [rootNode.id];
+    while (queue.length) {
+      const cur = queue.shift()!;
+      if (seen.has(cur)) continue;
+      seen.add(cur);
+      const node = byId.get(cur);
+      if (node) ordered.push(node);
+      for (const c of children.get(cur) ?? []) if (!seen.has(c)) queue.push(c);
+    }
+    // 任何 BFS 沒走到的(理論上不該有)→ 補在後面,parent 補成 root。
+    for (const n of nodes) if (!seen.has(n.id)) ordered.push(n);
+
+    const mmNodes: MindmapNode[] = ordered.map((n) => {
+      const d = n.data as MindmapNodeData;
+      const p = n.id === rootNode.id ? undefined : effParent(n.id) ?? rootNode.id;
+      return {
+        key: n.id,
+        mid: d.mid,
+        text: d.text,
+        shape: d.shape,
+        icon: d.icon?.trim() || undefined,
+        cls: d.cls?.trim() || undefined,
+        parent: p,
+      };
+    });
+
+    const model: MindmapModel = { nodes: mmNodes };
+    onSave(serializeMindmap(model));
+  }, [nodes, edges, onSave]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: fill ? '100%' : '70vh' }}>
+      <Space wrap style={{ marginBottom: 8 }}>
+        <Button icon={<PlusOutlined />} onClick={addChild} data-loc="mindmap:add-child">
+          新增子節點
+        </Button>
+        <Button icon={<BranchesOutlined />} onClick={addSibling} data-loc="mindmap:add-sibling">
+          新增兄弟
+        </Button>
+        <Space.Compact>
+          <Button
+            size="small"
+            icon={<UndoOutlined />}
+            disabled={!past.length}
+            onClick={undo}
+            title="復原(Ctrl+Z)"
+            data-loc="mindmap:undo"
+          />
+          <Button
+            size="small"
+            icon={<RedoOutlined />}
+            disabled={!future.length}
+            onClick={redo}
+            title="重做(Ctrl+Y)"
+            data-loc="mindmap:redo"
+          />
+        </Space.Compact>
+        <Button
+          size="small"
+          icon={<ApartmentOutlined />}
+          onClick={() => {
+            takeSnapshot();
+            reLayout();
+          }}
+          data-loc="mindmap:layout"
+        >
+          自動排版
+        </Button>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          雙擊節點改 text/shape/icon/class · 拖把手連線=改 parent · Delete 刪子樹 · Ctrl+Z/Y
+        </Typography.Text>
+      </Space>
+
+      <div
+        style={{
+          flex: 1,
+          border: '1px solid #f0f0f0',
+          borderRadius: 8,
+          minHeight: 0,
+          outline: 'none',
+        }}
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        data-loc="mindmap:canvas"
+      >
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onNodeDragStart={() => takeSnapshot()}
+          onNodeDoubleClick={(_e, n) => {
+            const d = n.data as MindmapNodeData;
+            setEditNode({
+              id: n.id,
+              text: d.text,
+              shape: d.shape,
+              icon: d.icon ?? '',
+              cls: d.cls ?? '',
+            });
+          }}
+          nodeTypes={nodeTypes}
+          deleteKeyCode={['Delete', 'Backspace']}
+          fitView
+        >
+          <Background />
+          <Controls />
+          <MiniMap pannable zoomable />
+        </ReactFlow>
+      </div>
+
+      <Space style={{ marginTop: 8, justifyContent: 'flex-end' }}>
+        <Button onClick={onClose} data-loc="mindmap:cancel">
+          取消
+        </Button>
+        <Button type="primary" onClick={save} data-loc="mindmap:apply">
+          套用
+        </Button>
+      </Space>
+
+      {/* 節點編輯:text / shape / icon / class */}
+      <Modal
+        title="編輯節點"
+        open={!!editNode}
+        onOk={applyNode}
+        onCancel={() => setEditNode(null)}
+        okText="確定"
+        cancelText="取消"
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <span>
+            text{' '}
+            <Input
+              style={{ width: 280 }}
+              value={editNode?.text ?? ''}
+              onChange={(e) => setEditNode((s) => (s ? { ...s, text: e.target.value } : s))}
+              onPressEnter={applyNode}
+              placeholder="節點文字"
+              data-loc="mindmap:node-text"
+            />
+          </span>
+          <span>
+            shape{' '}
+            <Select
+              style={{ width: 200 }}
+              value={editNode?.shape ?? 'default'}
+              onChange={(v: MindmapShape) => setEditNode((s) => (s ? { ...s, shape: v } : s))}
+              options={SHAPE_OPTS}
+              data-loc="mindmap:node-shape"
+            />
+          </span>
+          <span>
+            icon{' '}
+            <Input
+              style={{ width: 280 }}
+              value={editNode?.icon ?? ''}
+              onChange={(e) => setEditNode((s) => (s ? { ...s, icon: e.target.value } : s))}
+              placeholder="(可空白,如 fa fa-book)"
+              data-loc="mindmap:node-icon"
+            />
+          </span>
+          <span>
+            class{' '}
+            <Input
+              style={{ width: 280 }}
+              value={editNode?.cls ?? ''}
+              onChange={(e) => setEditNode((s) => (s ? { ...s, cls: e.target.value } : s))}
+              placeholder="(可空白,空白分隔多個)"
+              data-loc="mindmap:node-class"
+            />
+          </span>
+        </Space>
+      </Modal>
+    </div>
+  );
+}
