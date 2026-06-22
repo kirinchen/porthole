@@ -568,7 +568,8 @@ function TreePanel() {
           titleRender={(node) => {
             const n = node as Node;
             return (
-              <span className="ph-row">
+              // data-path / data-leaf:供「引用內容」挑選器(ContentPick)從樹上取檔案路徑。
+              <span className="ph-row" data-path={n.path} data-leaf={n.isLeaf ? '1' : '0'}>
                 <span className="ph-row-name">{n.title as React.ReactNode}</span>
                 <span className="ph-row-actions" onClick={(e) => e.stopPropagation()}>
                   <EditOutlined

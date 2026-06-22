@@ -1,32 +1,77 @@
 /**
- * ContentPick — 內容挑選器(類似 DevPick,但抓的是元素的「資料內容」)。
- * 用途:像 Cursor 的 text mention —— 點畫面上任一塊內容(如 Explore 預覽的段落),
- * 把文字帶進 Chat 輸入框當引用,方便跟 agent 討論。
+ * ContentPick — 引用內容挑選器(類似 DevPick,但抓「資料內容」當引用)。
+ * 用途:像 Cursor 的 mention —— 點畫面上的內容段落或左側檔案樹,產生一段「引用」
+ * **複製到剪貼簿**(不自動插入),貼到 Chat / Session 給 agent,讓它知道你指哪一段。
  *
- *  - 由 `porthole:pick:start` 事件啟動(Chat 的「引用內容」鈕派發)。
- *  - hover 高亮游標下元素;click → 取其文字 → 派發 `porthole:mention` {text}
- *    (Chat 接住附進輸入框、App 切到 Chat)→ 自動退出。
- *  - Esc 退出。不經剪貼簿(http 區網下 navigator.clipboard 不可用)。
+ *  - 由 `porthole:pick:start` 事件啟動(「引用內容」鈕派發)。
+ *  - hover 高亮游標下元素;click:
+ *      · 點到左側檔案樹(explore:tree)的節點 → 複製 `@<path>`(檔案引用)。
+ *      · 點到內容(data-file 容器內)→ 複製 `@<path>#<標題路徑> (L<行號>)` + 引用內容。
+ *  - 複製走 navigator.clipboard;http 區網不可用時退回 execCommand('copy')。
+ *  - Esc 退出。
  */
 import { useEffect, useRef, useState } from 'react';
 import { getCurrentFile } from '../lib/currentFile';
 
 const HILITE = 'porthole-pick-hilite';
 
-/** 推算來源 `path:line`:挑到的元素在某 data-file 容器內 → path;
- *  再以挑到文字的首行在原始內容中找出行號。找不到行號就只給 path。 */
-function sourceOf(el: Element, text: string): string {
-  const path = el.closest('[data-file]')?.getAttribute('data-file') || '';
-  if (!path) return '';
-  const cf = getCurrentFile();
-  if (cf && cf.path === path) {
-    const firstLine = (text.split('\n').find((l) => l.trim()) || '').trim();
-    if (firstLine) {
-      const idx = cf.content.split('\n').findIndex((l) => l.includes(firstLine));
-      if (idx >= 0) return `${path}:${idx + 1}`;
+/** 複製到剪貼簿;http 區網(非 secure context)無 navigator.clipboard → execCommand fallback。 */
+function copyToClipboard(text: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard
+      .writeText(text)
+      .then(() => true)
+      .catch(() => execCopy(text));
+  }
+  return Promise.resolve(execCopy(text)); // 同步執行,維持在使用者手勢(click)內
+}
+function execCopy(text: string): boolean {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 由挑到的元素往回找標題階層(h1–h6),回傳由淺到深的標題文字(祖先路徑)。 */
+function headingPath(el: Element): string[] {
+  const root = el.closest('[data-file]');
+  if (!root) return [];
+  const heads = Array.from(root.querySelectorAll('h1,h2,h3,h4,h5,h6'));
+  // 只留位於 el 之前(或就是 el)的標題
+  const preceding = heads.filter(
+    (h) => h === el || (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+  );
+  // 由最後一個往前,維護遞減層級,組出祖先路徑
+  const path: string[] = [];
+  let minLevel = 7;
+  for (let i = preceding.length - 1; i >= 0; i--) {
+    const lvl = Number(preceding[i].tagName[1]);
+    if (lvl < minLevel) {
+      const t = (preceding[i].textContent || '').replace(/\s+/g, ' ').trim();
+      if (t) path.unshift(t);
+      minLevel = lvl;
     }
   }
   return path;
+}
+
+/** 推算挑到文字的起始行號(以 data-file 對應目前開啟檔內容比對);找不到回 null。 */
+function lineOf(path: string, text: string): number | null {
+  const cf = getCurrentFile();
+  if (!cf || cf.path !== path) return null;
+  const firstLine = (text.split('\n').find((l) => l.trim()) || '').trim();
+  if (!firstLine) return null;
+  const idx = cf.content.split('\n').findIndex((l) => l.includes(firstLine));
+  return idx >= 0 ? idx + 1 : null;
 }
 
 /** 取元素可讀文字:收斂空白、去多餘空行、上限 4000 字。 */
@@ -36,6 +81,18 @@ function readContent(el: Element): string {
     .replace(/\n{3,}/g, '\n\n')
     .trim()
     .slice(0, 4000);
+}
+
+/** 內容元素 → 引用字串:`@<path>#<標題路徑> (L<行號>)` 換行接引用內容。無 data-file 則只給文字。 */
+function buildContentMention(el: Element, text: string): string {
+  const path = el.closest('[data-file]')?.getAttribute('data-file') || '';
+  if (!path) return text;
+  const heads = headingPath(el);
+  const line = lineOf(path, text);
+  let header = `@${path}`;
+  if (heads.length) header += `#${heads.join(' › ')}`;
+  if (line) header += ` (L${line})`;
+  return `${header}\n${text}`;
 }
 
 export default function ContentPick() {
@@ -73,18 +130,31 @@ export default function ContentPick() {
       hoverRef.current = el;
     };
 
+    const done = (mention: string) => {
+      // execCopy 須在 click 手勢內同步執行(http 區網),故 copyToClipboard 對無 clipboard API 走同步路徑。
+      void copyToClipboard(mention).then((ok) => {
+        const head = mention.split('\n')[0];
+        setToast((ok ? '已複製引用:' : '複製失敗(請手動選取):') + head.slice(0, 80));
+        window.setTimeout(() => setToast(null), 3000);
+      });
+    };
+
     const onClick = (e: MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
       const el = e.target as Element | null;
       setActive(false);
       if (!el) return;
+      // 1) 左側檔案樹節點 → @<path>(檔案引用)
+      if (el.closest('[data-loc="explore:tree"]')) {
+        const p = el.closest('[data-path]')?.getAttribute('data-path');
+        if (p) done(`@${p}`);
+        return; // 點到樹但非節點 → 不處理
+      }
+      // 2) 內容 → @<path>#<標題> (L<行號>) + 引用內容
       const text = readContent(el);
       if (!text) return;
-      const source = sourceOf(el, text);
-      window.dispatchEvent(new CustomEvent('porthole:mention', { detail: { text, source } }));
-      setToast((source ? `[${source}] ` : '') + text.slice(0, 60));
-      window.setTimeout(() => setToast(null), 3000);
+      done(buildContentMention(el, text));
     };
 
     window.addEventListener('mousemove', onMove, true);
@@ -120,7 +190,7 @@ export default function ContentPick() {
           }}
           data-loc="contentpick:bar"
         >
-          PICK 內容 · 點任一塊內容帶入對話 · Esc 退出
+          PICK 引用 · 點內容或左側檔案 → 複製引用到剪貼簿 · Esc 退出
         </div>
       )}
       {toast && (
@@ -140,7 +210,7 @@ export default function ContentPick() {
             wordBreak: 'break-word',
           }}
         >
-          已帶入引用:{toast}
+          {toast}
         </div>
       )}
     </>
