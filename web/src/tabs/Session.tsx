@@ -23,7 +23,6 @@ import {
   DesktopOutlined,
   EditOutlined,
   DeleteOutlined,
-  HighlightOutlined,
 } from '@ant-design/icons';
 import Terminal from '../lib/Terminal';
 import { api, type ClaudeSession } from '../lib/api';
@@ -314,14 +313,6 @@ export default function Session({ repo, active }: Props) {
           data-loc="session:new"
         >
           新 session
-        </Button>
-        <Button
-          icon={<HighlightOutlined />}
-          onClick={() => window.dispatchEvent(new Event('porthole:pick:start'))}
-          title="挑畫面內容貼進此終端(Cursor 式引用)"
-          data-loc="session:pick"
-        >
-          引用內容
         </Button>
         {tmuxNames.length > 0 && <Tag color="green">{tmuxNames.length} 個背景 tmux</Tag>}
         {attached && (

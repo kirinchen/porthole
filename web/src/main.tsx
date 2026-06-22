@@ -45,7 +45,7 @@ createRoot(document.getElementById('root')!).render(
       <App />
       {/* DevPick 掛根層:Ctrl+F12 元素定位器 */}
       <DevPick />
-      {/* ContentPick:挑內容帶進 Chat 對話(由 Chat 的「引用內容」鈕啟動) */}
+      {/* ContentPick:挑內容 / 檔案 → 複製引用到剪貼簿(由 Explore 樹工具列「引用內容」鈕啟動) */}
       <ContentPick />
     </ConfigProvider>
   </StrictMode>,

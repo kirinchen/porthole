@@ -47,6 +47,7 @@ import {
   RightOutlined,
   ReloadOutlined,
   DeleteOutlined,
+  HighlightOutlined,
 } from '@ant-design/icons';
 import { api } from '../lib/api';
 import Markdown from '../components/Markdown';
@@ -522,6 +523,12 @@ function TreePanel() {
             onClick={c.refresh}
             title="重新整理(看 agent 改後結果)"
             data-loc="explore:tree:refresh"
+          />
+          <Button
+            icon={<HighlightOutlined />}
+            onClick={() => window.dispatchEvent(new Event('porthole:pick:start'))}
+            title="引用內容:點檔案 / 內容 → 複製引用到剪貼簿(Cursor 式)"
+            data-loc="explore:pick"
           />
         </Space.Compact>
         {!c.isMobile && (

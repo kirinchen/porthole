@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { Button, List, Spin, Alert, Typography, Space, Popover } from 'antd';
-import { UnorderedListOutlined, HighlightOutlined } from '@ant-design/icons';
+import { UnorderedListOutlined } from '@ant-design/icons';
 import { api, type ThreadMeta } from '../lib/api';
 import MentionTextArea from '../components/MentionTextArea';
 import Markdown from '../components/Markdown';
@@ -215,16 +215,6 @@ export default function Chat({ repo, isActive }: Props) {
         </div>
 
         <div style={{ borderTop: '1px solid #f0f0f0', padding: 12 }}>
-          <Button
-            size="small"
-            icon={<HighlightOutlined />}
-            onClick={() => window.dispatchEvent(new Event('porthole:pick:start'))}
-            style={{ marginBottom: 8 }}
-            title="挑畫面上的內容帶進對話(Cursor 式引用)"
-            data-loc="chat:pick"
-          >
-            引用內容
-          </Button>
           <Space.Compact style={{ width: '100%' }}>
             <MentionTextArea
               repo={repo}
