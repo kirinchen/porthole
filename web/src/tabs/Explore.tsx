@@ -48,6 +48,8 @@ import {
   ReloadOutlined,
   DeleteOutlined,
   HighlightOutlined,
+  FolderOutlined,
+  FileOutlined,
 } from '@ant-design/icons';
 import { api } from '../lib/api';
 import Markdown from '../components/Markdown';
@@ -135,6 +137,8 @@ interface ExploreCtx {
   sel: Selected | null;
   selPath: string | null;
   selectedKeys: React.Key[]; // 樹反白(導航 / 點選同步)
+  folderView: { path: string; items: Node[]; readmePath: string | null; readme: string | null } | null;
+  openPath: (path: string) => void; // 導航到 repo 內路徑(grid 點擊 / 程式導航)
   loadingFile: boolean;
   drawerOpen: boolean;
   setDrawerOpen: (b: boolean) => void;
@@ -190,6 +194,13 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   const [sel, setSel] = useState<Selected | null>(null);
   const [selPath, setSelPath] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
+  // 選資料夾時中央顯示:該夾內容 grid + README(若有)。選檔時為 null。
+  const [folderView, setFolderView] = useState<{
+    path: string;
+    items: Node[];
+    readmePath: string | null;
+    readme: string | null;
+  } | null>(null);
   const pendingNavRef = useRef<{ path: string; tab?: string } | null>(null); // 跨 repo 連結待開
   const didInitNav = useRef(false); // 初次載入是否已依 URL 開檔
   const [loadingFile, setLoadingFile] = useState(false);
@@ -282,13 +293,52 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     [repo],
   );
 
+  // 載入資料夾視圖:該夾 children(grid)+ README.md(若有,case-insensitive)。
+  const loadFolderView = useCallback(
+    async (path: string) => {
+      setLoadingFile(true);
+      setErr(null);
+      setEditing(false);
+      setSel(null); // 清檔案預覽 → 改顯示資料夾視圖
+      try {
+        const r = await api.tree(repo, path);
+        const items = r.items.map(toNode);
+        if (path) setTree((prev) => updateChildren(prev, path, items)); // 同步進樹(展開可見)
+        const readmeNode = items.find((n) => n.isLeaf && /^readme\.md$/i.test(String(n.title)));
+        let readme: string | null = null;
+        let readmePath: string | null = null;
+        if (readmeNode) {
+          try {
+            const f = await api.file(repo, readmeNode.path);
+            readme = f.content;
+            readmePath = readmeNode.path;
+          } catch {
+            /* README 載不到 → 只顯示 grid */
+          }
+        }
+        setFolderView({ path, items, readmePath, readme });
+        // README 連結相對解析基準 + ContentPick 行號:指向 README。
+        setCurrentFile(readmePath && readme != null ? { path: readmePath, content: readme } : null);
+      } catch (e) {
+        setErr((e as Error).message);
+      } finally {
+        setLoadingFile(false);
+      }
+    },
+    [repo],
+  );
+
   const onSelect = async (_keys: React.Key[], info: { node: TreeDataNode }) => {
     const n = info.node as Node;
     setSelPath(n.path);
     setSelectedKeys([n.path]);
     setBaseDir(n.isLeaf ? parentDir(n.path) : n.path); // 選檔→父夾;選資料夾→該夾
     writeUrl(n.path); // 點選即同步網址列(deep-link)
-    if (!n.isLeaf) return; // 資料夾:只更新標題,不載預覽
+    if (!n.isLeaf) {
+      void loadFolderView(n.path); // 資料夾:中央顯示 grid + README
+      return;
+    }
+    setFolderView(null); // 選檔 → 清資料夾視圖
     setLoadingFile(true);
     setErr(null);
     setEditing(false);
@@ -336,6 +386,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       // 檔案
       try {
         const f = await api.file(repo, p);
+        setFolderView(null);
         setEditing(false);
         setErr(null);
         setSel({ path: p, content: f.content, markdown: f.markdown });
@@ -350,22 +401,21 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       } catch {
         /* 不是檔案 → 試資料夾 */
       }
-      // 資料夾:展開 + 反白(不開檔)
+      // 資料夾:展開 + 反白 + 中央顯示 grid + README(不開檔)
       try {
-        const r = await api.tree(repo, p);
-        setTree((prev) => updateChildren(prev, p, r.items.map(toNode)));
         await revealAncestors(p);
         setLoadedKeys((k) => Array.from(new Set([...k.map(String), p])));
         setExpandedKeys((k) => Array.from(new Set([...k.map(String), p])));
         setSelPath(p);
         setSelectedKeys([p]);
         setBaseDir(p);
+        await loadFolderView(p); // 內含 setTree 子節點 + README
         writeUrl(p, tab);
       } catch {
         setErr(`找不到連結目標:${p}`);
       }
     },
-    [repo, revealAncestors, writeUrl],
+    [repo, revealAncestors, writeUrl, loadFolderView],
   );
 
   // 連結點擊導航(MarkdownEditor 派 porthole:navigate)。跨 repo → 暫存,待 repo 換好再開。
@@ -559,6 +609,9 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     sel,
     selPath,
     selectedKeys,
+    folderView,
+    openPath: (p: string) =>
+      window.dispatchEvent(new CustomEvent('porthole:navigate', { detail: { repo, path: p } })),
     loadingFile,
     drawerOpen,
     setDrawerOpen,
@@ -774,7 +827,7 @@ export function ExplorePreview() {
     <div
       style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
       data-loc="explore:preview"
-      data-file={c.sel?.path || undefined}
+      data-file={c.sel?.path || c.folderView?.readmePath || undefined}
     >
       {(c.isMobile || c.sel || c.selPath) && (
         <div
@@ -861,6 +914,64 @@ export function ExplorePreview() {
           )
         ) : c.loadingFile ? (
           <Spin />
+        ) : c.folderView ? (
+          <div data-loc="explore:folder">
+            {c.folderView.items.length === 0 ? (
+              <Empty description="空資料夾" />
+            ) : (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                  gap: 8,
+                }}
+              >
+                {[...c.folderView.items]
+                  .sort((a, b) =>
+                    a.isLeaf === b.isLeaf
+                      ? String(a.title).localeCompare(String(b.title))
+                      : a.isLeaf
+                        ? 1
+                        : -1,
+                  )
+                  .map((it) => (
+                    <div
+                      key={it.path}
+                      onClick={() => c.openPath(it.path)}
+                      title={it.path}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '10px 12px',
+                        border: '1px solid #f0f0f0',
+                        borderRadius: 8,
+                        cursor: 'pointer',
+                        overflow: 'hidden',
+                      }}
+                      data-loc="explore:folder:item"
+                    >
+                      {it.isLeaf ? (
+                        <FileOutlined style={{ color: '#888' }} />
+                      ) : (
+                        <FolderOutlined style={{ color: '#1677ff' }} />
+                      )}
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {String(it.title)}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            )}
+            {c.folderView.readme != null && (
+              <div
+                className="md-preview"
+                style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #f0f0f0' }}
+              >
+                <Markdown>{c.folderView.readme}</Markdown>
+              </div>
+            )}
+          </div>
         ) : !c.sel ? (
           <Empty description="選一個檔案預覽" />
         ) : c.sel.markdown ? (
