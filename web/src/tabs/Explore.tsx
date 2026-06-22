@@ -271,11 +271,23 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setTree((prev) => updateChildren(prev, n.key as string, children));
   };
 
+  // 把網址列同步成 /<repo>/<path>#<tab>(雙向 deep-link 用)。
+  const writeUrl = useCallback(
+    (path: string, tab?: string) => {
+      const TABS = ['explore', 'chat', 'session', 'cli'];
+      const t = tab && TABS.includes(tab) ? tab : location.hash.replace(/^#/, '') || 'explore';
+      const enc = path.split('/').map(encodeURIComponent).join('/');
+      history.replaceState(null, '', `/${encodeURIComponent(repo)}/${enc}#${t}`);
+    },
+    [repo],
+  );
+
   const onSelect = async (_keys: React.Key[], info: { node: TreeDataNode }) => {
     const n = info.node as Node;
     setSelPath(n.path);
     setSelectedKeys([n.path]);
     setBaseDir(n.isLeaf ? parentDir(n.path) : n.path); // 選檔→父夾;選資料夾→該夾
+    writeUrl(n.path); // 點選即同步網址列(deep-link)
     if (!n.isLeaf) return; // 資料夾:只更新標題,不載預覽
     setLoadingFile(true);
     setErr(null);
@@ -293,17 +305,6 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       setLoadingFile(false);
     }
   };
-
-  // 把網址列同步成 /<repo>/<path>#<tab>(雙向 deep-link 用)。
-  const writeUrl = useCallback(
-    (path: string, tab?: string) => {
-      const TABS = ['explore', 'chat', 'session', 'cli'];
-      const t = tab && TABS.includes(tab) ? tab : location.hash.replace(/^#/, '') || 'explore';
-      const enc = path.split('/').map(encodeURIComponent).join('/');
-      history.replaceState(null, '', `/${encodeURIComponent(repo)}/${enc}#${t}`);
-    },
-    [repo],
-  );
 
   // 逐層載入 + 展開祖先目錄(lazy tree),讓深層目標可被展開反白。
   const revealAncestors = useCallback(
