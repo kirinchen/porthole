@@ -135,6 +135,17 @@ export default function App() {
     document.title = repo ? `${repo} · porthole` : 'porthole · 舷窗';
   }, [repo]);
 
+  // 連結導航(MarkdownEditor 派 porthole:navigate):切 repo / tab;開檔由 Explore 接手。
+  useEffect(() => {
+    const onNav = (e: Event) => {
+      const d = (e as CustomEvent).detail as { repo?: string; tab?: string };
+      if (d.repo && d.repo !== repo) setRepo(d.repo);
+      if (d.tab && (TAB_KEYS as string[]).includes(d.tab)) setTab(d.tab as TabKey);
+    };
+    window.addEventListener('porthole:navigate', onNav);
+    return () => window.removeEventListener('porthole:navigate', onNav);
+  }, [repo]);
+
   // tab → URL hash(切 tab 只改 hash,不灌歷史)
   useEffect(() => {
     if (location.hash !== `#${tab}`) {

@@ -28,6 +28,8 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { createRoot, type Root } from 'react-dom/client';
 import MermaidBlock from './MermaidBlock';
 import D2Block from './D2Block';
+import { getCurrentFile } from '../lib/currentFile';
+import { resolveLink } from '../lib/pathLink';
 
 /** 支援 GUI / 互動 widget 的 fenced 圖型語言。 */
 const FENCE_LANGS = ['mermaid', 'd2'] as const;
@@ -292,6 +294,42 @@ const flowContextMenu = EditorView.domEventHandlers({
   },
 });
 
+/** 取 pos 所在 Link 節點的 URL(原始碼);非連結回 null。 */
+function linkHrefAt(state: EditorState, pos: number): string | null {
+  let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, 0);
+  while (node && node.name !== 'Link') node = node.parent;
+  if (!node) return null;
+  const url = node.getChild('URL');
+  return url ? state.doc.sliceString(url.from, url.to) : null;
+}
+
+/**
+ * 連結點擊導航:點到 live-preview 的連結(非游標所在行)→ 解析 href:
+ *  - 外部 → 新分頁;站內 → 派 `porthole:navigate`(App 切 repo/tab、Explore 開檔/展開)。
+ * 游標所在行(編輯中)維持正常點擊,不導航。
+ */
+const linkNav = EditorView.domEventHandlers({
+  mousedown(e, view) {
+    const t = e.target as HTMLElement | null;
+    if (!t || !t.closest('.cm-link')) return false;
+    const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+    if (pos == null) return false;
+    const clickedLine = view.state.doc.lineAt(pos).number;
+    const activeLine = view.state.doc.lineAt(view.state.selection.main.head).number;
+    if (clickedLine === activeLine) return false; // 編輯中的行 → 不攔
+    const href = linkHrefAt(view.state, pos);
+    if (!href) return false;
+    e.preventDefault();
+    const repo = decodeURIComponent(location.pathname.split('/').filter(Boolean)[0] ?? '');
+    const cur = getCurrentFile();
+    const target = resolveLink(href, repo, cur?.path ?? '');
+    if (!target) return true;
+    if (target.kind === 'external') window.open(target.url, '_blank', 'noopener');
+    else window.dispatchEvent(new CustomEvent('porthole:navigate', { detail: target }));
+    return true;
+  },
+});
+
 /** 依游標位置決定哪些行要露出原始碼,其餘套 live-preview 裝飾。 */
 function buildDecorations(view: EditorView): DecorationSet {
   const { doc } = view.state;
@@ -425,6 +463,7 @@ export default function MarkdownEditor({ value, onChange }: Props) {
           EditorView.lineWrapping,
           mermaidField,
           flowContextMenu,
+          linkNav,
           livePreview,
           theme,
           EditorView.updateListener.of((u) => {

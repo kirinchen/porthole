@@ -134,6 +134,7 @@ interface ExploreCtx {
   err: string | null;
   sel: Selected | null;
   selPath: string | null;
+  selectedKeys: React.Key[]; // 樹反白(導航 / 點選同步)
   loadingFile: boolean;
   drawerOpen: boolean;
   setDrawerOpen: (b: boolean) => void;
@@ -188,6 +189,9 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   const [err, setErr] = useState<string | null>(null);
   const [sel, setSel] = useState<Selected | null>(null);
   const [selPath, setSelPath] = useState<string | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
+  const pendingNavRef = useRef<{ path: string; tab?: string } | null>(null); // 跨 repo 連結待開
+  const didInitNav = useRef(false); // 初次載入是否已依 URL 開檔
   const [loadingFile, setLoadingFile] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -231,6 +235,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setTree([]);
     setSel(null);
     setSelPath(null);
+    setSelectedKeys([]);
     setCurrentFile(null);
     setBaseDir('');
     setExpandedKeys([]);
@@ -240,7 +245,20 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     // 換 repo:直接抓根層(展開狀態已清空,不能用 reloadTree 的舊 closure)
     api
       .tree(repo, '.')
-      .then((r) => setTree(r.items.map(toNode)))
+      .then((r) => {
+        setTree(r.items.map(toNode));
+        // 載根後:跨 repo 連結的待開目標 > 初次載入時 URL 內的 file path(deep-link)。
+        let want = pendingNavRef.current;
+        pendingNavRef.current = null;
+        if (!want && !didInitNav.current) {
+          const segs = location.pathname.split('/').filter(Boolean).map((s) => decodeURIComponent(s));
+          if (segs.length > 1) {
+            want = { path: segs.slice(1).join('/'), tab: location.hash.replace(/^#/, '') || undefined };
+          }
+        }
+        didInitNav.current = true;
+        if (want?.path) void navigateTo(want.path, want.tab);
+      })
       .catch((e: Error) => setErr(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo]);
@@ -256,6 +274,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   const onSelect = async (_keys: React.Key[], info: { node: TreeDataNode }) => {
     const n = info.node as Node;
     setSelPath(n.path);
+    setSelectedKeys([n.path]);
     setBaseDir(n.isLeaf ? parentDir(n.path) : n.path); // 選檔→父夾;選資料夾→該夾
     if (!n.isLeaf) return; // 資料夾:只更新標題,不載預覽
     setLoadingFile(true);
@@ -274,6 +293,94 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       setLoadingFile(false);
     }
   };
+
+  // 把網址列同步成 /<repo>/<path>#<tab>(雙向 deep-link 用)。
+  const writeUrl = useCallback(
+    (path: string, tab?: string) => {
+      const TABS = ['explore', 'chat', 'session', 'cli'];
+      const t = tab && TABS.includes(tab) ? tab : location.hash.replace(/^#/, '') || 'explore';
+      const enc = path.split('/').map(encodeURIComponent).join('/');
+      history.replaceState(null, '', `/${encodeURIComponent(repo)}/${enc}#${t}`);
+    },
+    [repo],
+  );
+
+  // 逐層載入 + 展開祖先目錄(lazy tree),讓深層目標可被展開反白。
+  const revealAncestors = useCallback(
+    async (path: string) => {
+      const parts = path.split('/').filter(Boolean);
+      const ancestors: string[] = [];
+      for (let i = 0; i < parts.length - 1; i++) ancestors.push(parts.slice(0, i + 1).join('/'));
+      for (const dir of ancestors) {
+        try {
+          const r = await api.tree(repo, dir);
+          setTree((prev) => updateChildren(prev, dir, r.items.map(toNode)));
+        } catch {
+          /* 略過載不到的層 */
+        }
+      }
+      if (ancestors.length) {
+        setLoadedKeys((k) => Array.from(new Set([...k.map(String), ...ancestors])));
+        setExpandedKeys((k) => Array.from(new Set([...k.map(String), ...ancestors])));
+      }
+    },
+    [repo],
+  );
+
+  /** 導航到 repo 內路徑:先試當檔案開,失敗試當資料夾展開;都不行 → 錯誤。並同步網址列。 */
+  const navigateTo = useCallback(
+    async (rawPath: string, tab?: string) => {
+      const p = rawPath.replace(/^\/+|\/+$/g, '');
+      if (!p) return;
+      // 檔案
+      try {
+        const f = await api.file(repo, p);
+        setEditing(false);
+        setErr(null);
+        setSel({ path: p, content: f.content, markdown: f.markdown });
+        setCurrentFile({ path: p, content: f.content });
+        setSelPath(p);
+        setBaseDir(parentDir(p));
+        setDrawerOpen(false);
+        await revealAncestors(p);
+        setSelectedKeys([p]);
+        writeUrl(p, tab);
+        return;
+      } catch {
+        /* 不是檔案 → 試資料夾 */
+      }
+      // 資料夾:展開 + 反白(不開檔)
+      try {
+        const r = await api.tree(repo, p);
+        setTree((prev) => updateChildren(prev, p, r.items.map(toNode)));
+        await revealAncestors(p);
+        setLoadedKeys((k) => Array.from(new Set([...k.map(String), p])));
+        setExpandedKeys((k) => Array.from(new Set([...k.map(String), p])));
+        setSelPath(p);
+        setSelectedKeys([p]);
+        setBaseDir(p);
+        writeUrl(p, tab);
+      } catch {
+        setErr(`找不到連結目標:${p}`);
+      }
+    },
+    [repo, revealAncestors, writeUrl],
+  );
+
+  // 連結點擊導航(MarkdownEditor 派 porthole:navigate)。跨 repo → 暫存,待 repo 換好再開。
+  useEffect(() => {
+    const onNav = (e: Event) => {
+      const d = (e as CustomEvent).detail as { repo?: string; path?: string; tab?: string };
+      if (!d?.path) return; // 純切 tab(無 path)交給 App 處理
+      if (d.repo && d.repo !== repo) {
+        pendingNavRef.current = { path: d.path, tab: d.tab };
+        return; // App 會 setRepo;換好後由 repo 變更 effect 接手開檔
+      }
+      void navigateTo(d.path, d.tab);
+    };
+    window.addEventListener('porthole:navigate', onNav);
+    return () => window.removeEventListener('porthole:navigate', onNav);
+  }, [repo, navigateTo]);
 
   const startEdit = () => {
     if (!sel) return;
@@ -450,6 +557,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     err,
     sel,
     selPath,
+    selectedKeys,
     loadingFile,
     drawerOpen,
     setDrawerOpen,
@@ -567,6 +675,7 @@ function TreePanel() {
           treeData={c.tree}
           loadData={c.onLoadData}
           onSelect={c.onSelect}
+          selectedKeys={c.selectedKeys}
           expandedKeys={c.expandedKeys}
           onExpand={(keys) => c.setExpandedKeys(keys)}
           loadedKeys={c.loadedKeys}
