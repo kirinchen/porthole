@@ -43,6 +43,15 @@ function splitHash(s: string): [string, string] {
   return i >= 0 ? [s.slice(0, i), s.slice(i)] : [s, ''];
 }
 
+/** 安全 percent-decode(壞編碼則原樣回);路徑送 api 前須為 raw,否則 server 端會多一層 %。 */
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 /** 解析站內 pathname(`/<repo>/<path>`)+ hash → internal target。 */
 function parseInternalPath(pathname: string, hash: string): LinkTarget {
   const segs = pathname.split('/').filter(Boolean).map((s) => decodeURIComponent(s));
@@ -85,9 +94,11 @@ export function resolveLink(href: string, curRepo: string, curFilePath: string):
     return parseInternalPath(p, hash);
   }
 
-  // 相對路徑(含 ..)→ 以目前檔案所在目錄為基準,同 repo
+  // 相對路徑(含 ..)→ 以目前檔案所在目錄為基準,同 repo。
+  // href 可能 percent-encoded(尤其中文檔名)→ 先解碼成 raw,避免送 api 後 server 多一層 %。
   const [rel, hash] = splitHash(raw);
   const base = dirOf(curFilePath);
-  const path = normalizePath(base ? `${base}/${rel}` : rel);
+  const decoded = safeDecode(rel);
+  const path = normalizePath(base ? `${base}/${decoded}` : decoded);
   return { kind: 'internal', repo: curRepo, path, tab: tabFromHash(hash) };
 }
