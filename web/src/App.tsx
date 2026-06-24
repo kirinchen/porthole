@@ -146,6 +146,16 @@ export default function App() {
     return () => window.removeEventListener('porthole:navigate', onNav);
   }, [repo]);
 
+  // 上一頁 / 下一頁:依新 URL 同步 repo / tab(檔案由 Explore 的 popstate 接手開)。
+  useEffect(() => {
+    const onPop = () => {
+      setRepo(repoFromUrl());
+      setTab(tabFromUrl());
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
   // tab → URL hash(切 tab 只改 hash,不灌歷史)
   useEffect(() => {
     if (location.hash !== `#${tab}`) {

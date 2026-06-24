@@ -268,7 +268,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
           }
         }
         didInitNav.current = true;
-        if (want?.path) void navigateTo(want.path, want.tab);
+        if (want?.path) void navigateTo(want.path, want.tab, false); // 初次/deep-link → 不新增歷史
       })
       .catch((e: Error) => setErr(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -282,13 +282,15 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setTree((prev) => updateChildren(prev, n.key as string, children));
   };
 
-  // 把網址列同步成 /<repo>/<path>#<tab>(雙向 deep-link 用)。
+  // 把網址列同步成 /<repo>/<path>#<tab>。push=true → 新增歷史一筆(可上一頁);否則取代。
   const writeUrl = useCallback(
-    (path: string, tab?: string) => {
+    (path: string, tab?: string, push = false) => {
       const TABS = ['explore', 'chat', 'session', 'cli'];
       const t = tab && TABS.includes(tab) ? tab : location.hash.replace(/^#/, '') || 'explore';
       const enc = path.split('/').map(encodeURIComponent).join('/');
-      history.replaceState(null, '', `/${encodeURIComponent(repo)}/${enc}#${t}`);
+      const url = `/${encodeURIComponent(repo)}/${enc}#${t}`;
+      if (push && location.pathname + location.hash !== url) history.pushState(null, '', url);
+      else history.replaceState(null, '', url);
     },
     [repo],
   );
@@ -333,7 +335,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setSelPath(n.path);
     setSelectedKeys([n.path]);
     setBaseDir(n.isLeaf ? parentDir(n.path) : n.path); // 選檔→父夾;選資料夾→該夾
-    writeUrl(n.path); // 點選即同步網址列(deep-link)
+    writeUrl(n.path, undefined, true); // 點選即同步網址列 + 留歷史(可上一頁)
     if (!n.isLeaf) {
       void loadFolderView(n.path); // 資料夾:中央顯示 grid + README
       return;
@@ -378,9 +380,10 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     [repo],
   );
 
-  /** 導航到 repo 內路徑:先試當檔案開,失敗試當資料夾展開;都不行 → 錯誤。並同步網址列。 */
+  /** 導航到 repo 內路徑:先試當檔案開,失敗試當資料夾展開;都不行 → 錯誤。並同步網址列。
+   *  push=true(連結 / grid 點擊)→ 留歷史可上一頁;false(deep-link 載入 / popstate)→ 取代。 */
   const navigateTo = useCallback(
-    async (rawPath: string, tab?: string) => {
+    async (rawPath: string, tab?: string, push = true) => {
       const p = rawPath.replace(/^\/+|\/+$/g, '');
       if (!p) return;
       // 檔案
@@ -396,7 +399,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
         setDrawerOpen(false);
         await revealAncestors(p);
         setSelectedKeys([p]);
-        writeUrl(p, tab);
+        writeUrl(p, tab, push);
         return;
       } catch {
         /* 不是檔案 → 試資料夾 */
@@ -410,7 +413,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
         setSelectedKeys([p]);
         setBaseDir(p);
         await loadFolderView(p); // 內含 setTree 子節點 + README
-        writeUrl(p, tab);
+        writeUrl(p, tab, push);
       } catch {
         setErr(`找不到連結目標:${p}`);
       }
@@ -431,6 +434,26 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     };
     window.addEventListener('porthole:navigate', onNav);
     return () => window.removeEventListener('porthole:navigate', onNav);
+  }, [repo, navigateTo]);
+
+  // 上一頁 / 下一頁(popstate):依新 URL 重開檔案/資料夾(push=false,不再灌歷史)。
+  useEffect(() => {
+    const onPop = () => {
+      const segs = location.pathname.split('/').filter(Boolean).map((s) => decodeURIComponent(s));
+      if (segs[0] !== repo) return; // 跨 repo 交給 App(切 repo 後由 repo effect 接手)
+      const path = segs.slice(1).join('/');
+      if (path) {
+        void navigateTo(path, location.hash.replace(/^#/, '') || undefined, false);
+      } else {
+        // 回到 repo 根(無 path)→ 清空中央視圖
+        setSel(null);
+        setFolderView(null);
+        setSelPath(null);
+        setSelectedKeys([]);
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
   }, [repo, navigateTo]);
 
   const startEdit = () => {
