@@ -25,6 +25,8 @@ import type { SyntaxNode } from '@lezer/common';
 import { syntaxTree } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
+import { mentionCompletionSource } from '../lib/mentionComplete';
 import { createRoot, type Root } from 'react-dom/client';
 import MermaidBlock from './MermaidBlock';
 import D2Block from './D2Block';
@@ -458,8 +460,10 @@ export default function MarkdownEditor({ value, onChange }: Props) {
         doc: value,
         extensions: [
           history(),
-          keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+          keymap.of([...completionKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
           markdown(),
+          // @ 選檔 / # 選章節 自動完成(可混用 @file#section)
+          autocompletion({ override: [mentionCompletionSource], icons: false }),
           EditorView.lineWrapping,
           mermaidField,
           flowContextMenu,
