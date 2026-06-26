@@ -511,6 +511,20 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     return () => window.removeEventListener('porthole:save-file', onSaveFile);
   }, [editing, sel, repo]);
 
+  // 編輯模式 Ctrl/Cmd+S → 存檔但「不離開編輯」(派 porthole:save-file 給上方 listener)。
+  // CM6 不攔 Ctrl+S,事件冒泡到 window;preventDefault 擋瀏覽器「儲存網頁」對話框。
+  useEffect(() => {
+    if (!editing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        window.dispatchEvent(new Event('porthole:save-file'));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editing]);
+
   // 重新整理:重載樹;若有開啟檔且非編輯中,重抓內容(看 agent 改後的結果)。
   const refresh = () => {
     reloadTree();
