@@ -40,6 +40,10 @@ export const api = {
       `/api/${repo}/file?path=${encodeURIComponent(path)}`,
     ),
 
+  /** 原始位元組 URL(圖片 <img src> 用);path-guard 在後端把關。 */
+  rawUrl: (repo: string, path: string) =>
+    `/api/${encodeURIComponent(repo)}/raw?path=${encodeURIComponent(path)}`,
+
   writeFile: async (
     repo: string,
     path: string,

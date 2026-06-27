@@ -12,6 +12,20 @@ import path from 'node:path';
 import { guard } from '../lib/path-guard.ts';
 
 const MAX_FILE = 2 * 1024 * 1024; // 2MB 上限,避免讀爆
+const MAX_RAW = 25 * 1024 * 1024; // raw 串流上限(圖片等)
+
+// 原始串流的 content-type(主要給圖片);其餘 application/octet-stream。
+const MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
+  '.avif': 'image/avif',
+};
 
 interface Entry {
   name: string;
@@ -67,6 +81,21 @@ export default async function fsRoutes(app: FastifyInstance) {
       const ext = path.extname(target).toLowerCase();
       const markdown = ext === '.md' || ext === '.markdown';
       return { content, markdown, ext };
+    },
+  );
+
+  // 原始位元組串流(圖片預覽用 <img src>)。path-guard;依副檔名給 content-type。
+  app.get<{ Params: { repo: string }; Querystring: { path?: string } }>(
+    '/api/:repo/raw',
+    async (req, reply) => {
+      const target = guard.resolveInRepo(req.params.repo, req.query.path ?? '');
+      const st = await fs.stat(target);
+      if (st.isDirectory()) return reply.code(400).send({ error: 'is a directory' });
+      if (st.size > MAX_RAW) return reply.code(413).send({ error: 'file too large' });
+      const buf = await fs.readFile(target);
+      reply.header('content-type', MIME[path.extname(target).toLowerCase()] ?? 'application/octet-stream');
+      reply.header('cache-control', 'no-cache');
+      return reply.send(buf);
     },
   );
 

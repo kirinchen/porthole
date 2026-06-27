@@ -65,7 +65,11 @@ interface Selected {
   content: string;
   markdown: boolean;
   isNew?: boolean; // 新檔尚未存到磁碟
+  image?: boolean; // 圖片檔(以 <img> 預覽,不抓文字內容)
 }
+
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i;
+const isImage = (p: string) => IMAGE_EXT.test(p);
 
 function toNode(item: { name: string; path: string; type: 'dir' | 'file' }): Node {
   return {
@@ -341,11 +345,18 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       return;
     }
     setFolderView(null); // 選檔 → 清資料夾視圖
-    setLoadingFile(true);
     setErr(null);
     setEditing(false);
     setSaveErr(null);
     setNote(null);
+    // 圖片:不抓文字內容,直接以 <img> 預覽。
+    if (isImage(n.path)) {
+      setSel({ path: n.path, content: '', markdown: false, image: true });
+      setCurrentFile(null);
+      setDrawerOpen(false);
+      return;
+    }
+    setLoadingFile(true);
     try {
       const f = await api.file(repo, n.path);
       setSel({ path: n.path, content: f.content, markdown: f.markdown });
@@ -386,6 +397,21 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     async (rawPath: string, tab?: string, push = true) => {
       const p = rawPath.replace(/^\/+|\/+$/g, '');
       if (!p) return;
+      // 圖片:不抓文字,直接 <img> 預覽(圖片必為檔案)。
+      if (isImage(p)) {
+        setFolderView(null);
+        setEditing(false);
+        setErr(null);
+        setSel({ path: p, content: '', markdown: false, image: true });
+        setCurrentFile(null);
+        setSelPath(p);
+        setBaseDir(parentDir(p));
+        setDrawerOpen(false);
+        await revealAncestors(p);
+        setSelectedKeys([p]);
+        writeUrl(p, tab, push);
+        return;
+      }
       // 檔案
       try {
         const f = await api.file(repo, p);
@@ -889,6 +915,7 @@ export function ExplorePreview() {
             {c.sel?.isNew && c.selPath === c.sel.path ? ' (新檔)' : ''}
           </Typography.Text>
           {c.sel &&
+            !c.sel.image &&
             (c.editing ? (
               <Space.Compact>
                 <Button
@@ -1011,6 +1038,13 @@ export function ExplorePreview() {
           </div>
         ) : !c.sel ? (
           <Empty description="選一個檔案預覽" />
+        ) : c.sel.image ? (
+          <img
+            src={api.rawUrl(c.repo, c.sel.path)}
+            alt={c.sel.path}
+            style={{ maxWidth: '100%', height: 'auto', display: 'block' }}
+            data-loc="explore:image"
+          />
         ) : c.sel.markdown ? (
           <div className="md-preview">
             <Markdown>{c.sel.content}</Markdown>
