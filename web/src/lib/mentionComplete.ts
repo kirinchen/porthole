@@ -16,9 +16,24 @@ import {
 } from '@codemirror/autocomplete';
 import type { EditorView } from '@codemirror/view';
 import { api, type TreeItem } from './api';
+import { getCurrentFile } from './currentFile';
+import { normalizePath } from './pathLink';
 
 function repoFromUrl(): string {
   return decodeURIComponent(location.pathname.split('/').filter(Boolean)[0] ?? '');
+}
+
+/** 目前編輯檔所在目錄(repo 相對);@ 路徑以此為基準,讓 `../` 直覺地往上。 */
+function curFileDir(): string {
+  const p = getCurrentFile()?.path ?? '';
+  const i = p.lastIndexOf('/');
+  return i >= 0 ? p.slice(0, i) : '';
+}
+
+/** 把(可能相對的)路徑以目前檔目錄為基準,正規化成 repo 相對(`..` 夾在 root)。 */
+function resolveFromCurrent(rel: string): string {
+  const base = curFileDir();
+  return normalizePath(base ? `${base}/${rel}` : rel);
 }
 
 /** 標題 → 單一 token slug(空白收成 -,保留中文等)。 */
@@ -67,10 +82,10 @@ export async function mentionCompletionSource(
   const before = context.state.sliceDoc(Math.max(0, context.pos - 400), context.pos);
   const repo = repoFromUrl();
 
-  // 1) @file#section → 該檔標題
+  // 1) @file#section → 該檔標題(@path 相對目前檔解析)
   let m = /(?:^|\s)@([^\s@#]+)#([^\s#@]*)$/.exec(before);
   if (m) {
-    const filePath = m[1];
+    const filePath = resolveFromCurrent(m[1]);
     const query = m[2];
     let heads: string[] = [];
     try {
@@ -90,20 +105,21 @@ export async function mentionCompletionSource(
     return sectionResult(context.pos - query.length, heads, query);
   }
 
-  // 3) @file → 檔案 / 資料夾(lazy 逐層)
+  // 3) @file → 檔案 / 資料夾(lazy 逐層;以「目前編輯檔目錄」為基準,`../` 往上夾在 repo root)
   m = /(?:^|\s)@([^\s@#]*)$/.exec(before);
   if (m) {
     const query = m[1];
-    const { dir, prefix } = splitQuery(query);
+    const { dir: qDir, prefix } = splitQuery(query);
+    const actualDir = resolveFromCurrent(qDir); // 相對目前檔解析成 repo 相對(含 .. clamp)
     let items: TreeItem[] = [];
     try {
-      const r = await api.tree(repo, dir);
+      const r = await api.tree(repo, actualDir || '.');
       items = r.items;
     } catch {
-      items = []; // 多半逃出 repo root 被 path-guard 擋
+      items = [];
     }
     const options: Completion[] = [];
-    if (dir !== '.') options.push({ label: '../', type: 'folder', apply: applyFolder('..') });
+    if (actualDir !== '') options.push({ label: '../', type: 'folder', apply: applyFolder('..') }); // 還能往上
     for (const it of items) {
       if (it.type === 'dir') options.push({ label: `${it.name}/`, type: 'folder', apply: applyFolder(it.name) });
       else options.push({ label: it.name, type: 'file' });
