@@ -53,6 +53,31 @@ function genTitle(content: string, cwd: string): Promise<string> {
   });
 }
 
+// 上文 context 上限(避免超長 thread 把 prompt 撐爆;取尾端最近的對話)。
+const MAX_CTX = 120 * 1024;
+
+/**
+ * 把該 thread 先前的紀錄(porthole 的 turn markdown)組成 context,接上最新訊息。
+ * claude -p 是 stateless 的一次性呼叫,不帶上文就「沒記憶」→ 這裡把對話餵回去。
+ */
+function buildContextPrompt(priorRaw: string, latest: string): string {
+  let prior = priorRaw.trim();
+  if (!prior) return latest; // 新 thread:無上文
+  if (prior.length > MAX_CTX) prior = prior.slice(-MAX_CTX); // 只留最近
+  const transcript = prior
+    .replace(/^\s*##\s*🧑\s*Human\s*·.*$/gm, '\n[使用者]')
+    .replace(/^\s*##\s*🤖\s*Assistant\s*·.*$/gm, '\n[你先前的回覆]')
+    .trim();
+  return (
+    '以下是我們先前的對話紀錄,請延續它、保持脈絡與記憶來回答(不要重複問已知資訊):\n\n' +
+    '===== 對話紀錄(舊→新)=====\n' +
+    transcript +
+    '\n===== 紀錄結束 =====\n\n' +
+    '[使用者最新訊息]\n' +
+    latest
+  );
+}
+
 export default async function chatRoutes(app: FastifyInstance) {
   app.get<{ Params: { repo: string } }>('/api/:repo/chat/threads', async (req) => {
     const repoRoot = guard.repoRoot(req.params.repo);
@@ -134,6 +159,14 @@ export default async function chatRoutes(app: FastifyInstance) {
       const file = guard.resolveInRepo(repo, rel); // 寫入面:只允許 doc/chat/
       await fs.mkdir(path.dirname(file), { recursive: true });
 
+      // 取先前對話當 context(在寫入本輪 human turn「之前」讀,故是純粹的上文)。
+      let priorRaw = '';
+      try {
+        priorRaw = await fs.readFile(file, 'utf8');
+      } catch {
+        /* 新 thread,無上文 */
+      }
+
       // 先寫 human turn
       await fs.appendFile(file, `\n## 🧑 Human · ${nowIso()}\n\n${prompt}\n`);
 
@@ -149,7 +182,8 @@ export default async function chatRoutes(app: FastifyInstance) {
       };
 
       let assistant = '';
-      const run = runClaude(prompt, cwd);
+      // 帶上文:把先前對話 + 最新訊息一起給 claude -p(否則 stateless 沒記憶)。
+      const run = runClaude(buildContextPrompt(priorRaw, prompt), cwd);
 
       // client 中斷 → kill 子程序
       req.raw.on('close', () => run.abort());
