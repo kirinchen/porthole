@@ -87,8 +87,9 @@ export default async function chatRoutes(app: FastifyInstance) {
     },
   );
 
-  // 用 claude 分析對話主題,把 thread 改成貼切的 slug(寫入面仍鎖 doc/chat/)。
-  app.post<{ Params: { repo: string; thread: string } }>(
+  // thread 改名:body 給 {to} → 手動改名(safeThread 收斂);否則用 claude 分析主題自動命名。
+  // 寫入面仍鎖 doc/chat/。
+  app.post<{ Params: { repo: string; thread: string }; Body: { to?: string } }>(
     '/api/:repo/chat/threads/:thread/rename',
     async (req, reply) => {
       const repo = req.params.repo;
@@ -101,8 +102,9 @@ export default async function chatRoutes(app: FastifyInstance) {
         return reply.code(404).send({ error: 'thread not found' });
       }
 
-      const base = slugify(await genTitle(content, guard.repoRoot(repo)));
-      if (!base) return { name: oldName }; // 生不出主題就維持原名
+      const manual = (req.body?.to ?? '').trim();
+      const base = manual ? safeThread(manual) : slugify(await genTitle(content, guard.repoRoot(repo)));
+      if (!base) return { name: oldName }; // 給不出名字就維持原名
 
       // 命名衝突 → 加 -2/-3…;與原名相同則免改。
       let name = base;

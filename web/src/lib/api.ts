@@ -98,9 +98,12 @@ export const api = {
   thread: (repo: string, name: string) =>
     jget<{ content: string }>(`/api/${repo}/chat/threads/${encodeURIComponent(name)}`),
 
-  renameThread: async (repo: string, name: string) => {
+  /** to 有給 → 手動改名;否則 claude 依主題自動命名。回傳實際採用的名稱(可能加 -2 防衝突)。 */
+  renameThread: async (repo: string, name: string, to?: string) => {
     const r = await fetch(`/api/${repo}/chat/threads/${encodeURIComponent(name)}/rename`, {
       method: 'POST',
+      headers: to ? { 'Content-Type': 'application/json' } : undefined,
+      body: to ? JSON.stringify({ to }) : undefined,
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return (await r.json()) as { name: string };

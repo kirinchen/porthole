@@ -5,8 +5,8 @@
  *  - 送出 → POST /api/:repo/chat,SSE 逐字串回;後端把紀錄 append 到 doc/chat/<thread>.md
  */
 import { useEffect, useRef, useState } from 'react';
-import { Button, List, Spin, Alert, Typography, Space, Popover } from 'antd';
-import { UnorderedListOutlined } from '@ant-design/icons';
+import { Button, List, Spin, Alert, Typography, Space, Popover, Modal, Input } from 'antd';
+import { UnorderedListOutlined, EditOutlined } from '@ant-design/icons';
 import { api, type ThreadMeta } from '../lib/api';
 import MentionTextArea from '../components/MentionTextArea';
 import Markdown from '../components/Markdown';
@@ -29,6 +29,8 @@ export default function Chat({ repo, isActive }: Props) {
   const [streaming, setStreaming] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false); // 頂部 List 選單(thread 列表)
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameVal, setRenameVal] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef(true);
   useEffect(() => {
@@ -40,6 +42,23 @@ export default function Chat({ repo, isActive }: Props) {
       .threads(repo)
       .then((r) => setThreads(r.threads))
       .catch((e: Error) => setErr(e.message));
+  };
+
+  // thread 改名:有檔(已對話過)→ 後端 fs.rename;無檔(空 thread)→ 本地改名,下次訊息寫新檔。
+  const doRename = async () => {
+    const to = renameVal.trim();
+    if (!to || to === active) {
+      setRenameOpen(false);
+      return;
+    }
+    try {
+      const { name } = await api.renameThread(repo, active, to);
+      setActive(name);
+      loadThreads();
+    } catch {
+      setActive(to.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64) || 'default');
+    }
+    setRenameOpen(false);
   };
 
   useEffect(() => {
@@ -193,7 +212,36 @@ export default function Chat({ repo, isActive }: Props) {
         <Typography.Text ellipsis style={{ flex: 1, minWidth: 0 }}>
           {active}
         </Typography.Text>
+        <Button
+          size="small"
+          icon={<EditOutlined />}
+          title="重新命名此 thread"
+          onClick={() => {
+            setRenameVal(active);
+            setRenameOpen(true);
+          }}
+          data-loc="chat:rename"
+        />
       </div>
+
+      <Modal
+        title="重新命名 thread"
+        open={renameOpen}
+        onOk={doRename}
+        onCancel={() => setRenameOpen(false)}
+        okText="改名"
+        cancelText="取消"
+        okButtonProps={{ disabled: !renameVal.trim() }}
+      >
+        <Input
+          autoFocus
+          value={renameVal}
+          onChange={(e) => setRenameVal(e.target.value)}
+          onPressEnter={doRename}
+          placeholder="thread 名稱(僅 A-Z a-z 0-9 _ -)"
+          data-loc="chat:rename:input"
+        />
+      </Modal>
 
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16 }} data-loc="chat:messages">
