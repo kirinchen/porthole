@@ -15,13 +15,15 @@ import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 interface Props {
   /** .excalidraw JSON 文字(空字串 = 新檔,開空白白板)。 */
   code: string;
-  /** 存檔:opts.stay 只是為了與其他編輯器一致(這裡都是寫檔不離開)。 */
+  /** 存檔:opts.stay=true 留在編輯器;否則(block 內)套用後回預覽。 */
   onSave: (code: string, opts?: { stay?: boolean }) => void;
+  /** 有給(markdown block 用)→ 顯示「套用」「取消」;沒給(開檔)→ 只有「儲存」。 */
+  onClose?: () => void;
   /** 滿版(撐滿父容器)。 */
   fill?: boolean;
 }
 
-export default function ExcalidrawEditor({ code, onSave, fill }: Props) {
+export default function ExcalidrawEditor({ code, onSave, onClose, fill }: Props) {
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
 
   // 載入:解析檔內容當 initialData。appState 去掉 collaborators(Map,initialData 不吃)。
@@ -71,9 +73,19 @@ export default function ExcalidrawEditor({ code, onSave, fill }: Props) {
       data-loc="excalidraw:editor"
     >
       <Space style={{ marginBottom: 8, justifyContent: 'flex-end' }}>
-        <Button size="small" type="primary" onClick={() => save(true)} title="儲存(Ctrl+S)" data-loc="excalidraw:save">
+        {onClose && (
+          <Button size="small" onClick={onClose} data-loc="excalidraw:cancel">
+            取消
+          </Button>
+        )}
+        <Button size="small" onClick={() => save(true)} title="儲存(Ctrl+S),留在編輯器" data-loc="excalidraw:save">
           儲存
         </Button>
+        {onClose && (
+          <Button size="small" type="primary" onClick={() => save(false)} data-loc="excalidraw:apply">
+            套用
+          </Button>
+        )}
       </Space>
       <div style={{ flex: 1, minHeight: 0 }}>
         <Excalidraw

@@ -30,13 +30,14 @@ import { mentionCompletionSource } from '../lib/mentionComplete';
 import { createRoot, type Root } from 'react-dom/client';
 import MermaidBlock from './MermaidBlock';
 import D2Block from './D2Block';
+import ExcalidrawBlock from './ExcalidrawBlock';
 import { getCurrentFile } from '../lib/currentFile';
 import { resolveLink } from '../lib/pathLink';
 
 /** 支援 GUI / 互動 widget 的 fenced 圖型語言。 */
-const FENCE_LANGS = ['mermaid', 'd2'] as const;
+const FENCE_LANGS = ['mermaid', 'd2', 'excalidraw'] as const;
 type FenceLang = (typeof FENCE_LANGS)[number];
-const FENCE_COMPONENT = { mermaid: MermaidBlock, d2: D2Block } as const;
+const FENCE_COMPONENT = { mermaid: MermaidBlock, d2: D2Block, excalidraw: ExcalidrawBlock } as const;
 
 interface Props {
   value: string;
@@ -128,7 +129,7 @@ class FenceWidget extends WidgetType {
 /** 圖型 block widget 是 block / 跨行 replace → 只能走 StateField(不可由 plugin 提供)。 */
 function buildFenceDecos(state: EditorState): DecorationSet {
   const ranges: Range<Decoration>[] = [];
-  const counter: Record<FenceLang, number> = { mermaid: 0, d2: 0 }; // 同語言各自計數
+  const counter: Record<FenceLang, number> = { mermaid: 0, d2: 0, excalidraw: 0 }; // 同語言各自計數
   syntaxTree(state).iterate({
     enter: (node) => {
       if (node.name === 'FencedCode') {
@@ -226,6 +227,11 @@ const GUI_SAMPLES: { label: string; code: string }[] = [
     // D2 架構圖:容器是一等公民,支援「容器對容器」邊(mermaid architecture 做不到)。走後端 d2 CLI 渲染。
     label: '＋ D2 架構圖',
     code: ['```d2', 'api: API 層 {', '  server: 伺服器', '}', 'data: 資料層 {', '  db: 資料庫', '}', 'api -> data: 容器對容器', 'api.server -> data.db', '```'].join('\n'),
+  },
+  {
+    // Excalidraw:自由白板(Google Drawing 式),GUI tab 開白板編輯。空白起手。
+    label: '＋ Excalidraw 白板',
+    code: ['```excalidraw', '{"type":"excalidraw","version":2,"source":"porthole","elements":[],"appState":{},"files":{}}', '```'].join('\n'),
   },
 ];
 

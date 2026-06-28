@@ -9,6 +9,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import MermaidBlock from './MermaidBlock';
 import D2Block from './D2Block';
+import ExcalidrawBlock from './ExcalidrawBlock';
 import { getCurrentFile } from '../lib/currentFile';
 import { resolveLink } from '../lib/pathLink';
 
@@ -74,6 +75,14 @@ export default function Markdown({ children, onMermaidChange }: Props) {
           if (/\blanguage-d2\b/.test(cls)) {
             return (
               <D2Block
+                code={text}
+                onApply={onMermaidChange ? (nc) => onMermaidChange(text, nc) : undefined}
+              />
+            );
+          }
+          if (/\blanguage-excalidraw\b/.test(cls)) {
+            return (
+              <ExcalidrawBlock
                 code={text}
                 onApply={onMermaidChange ? (nc) => onMermaidChange(text, nc) : undefined}
               />
