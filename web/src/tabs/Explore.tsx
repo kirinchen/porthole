@@ -143,6 +143,7 @@ interface ExploreCtx {
   selectedKeys: React.Key[]; // 樹反白(導航 / 點選同步)
   folderView: { path: string; items: Node[]; readmePath: string | null; readme: string | null } | null;
   openPath: (path: string) => void; // 導航到 repo 內路徑(grid 點擊 / 程式導航)
+  reloadSeq: number; // refresh 重載序號(編輯器 key / 圖片 cache-bust)
   loadingFile: boolean;
   drawerOpen: boolean;
   setDrawerOpen: (b: boolean) => void;
@@ -207,6 +208,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   } | null>(null);
   const pendingNavRef = useRef<{ path: string; tab?: string } | null>(null); // 跨 repo 連結待開
   const didInitNav = useRef(false); // 初次載入是否已依 URL 開檔
+  const [reloadSeq, setReloadSeq] = useState(0); // refresh 重載編輯器/圖片(換 key / cache-bust)
   const [loadingFile, setLoadingFile] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -551,16 +553,29 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     return () => window.removeEventListener('keydown', onKey);
   }, [editing]);
 
-  // 重新整理:重載樹;若有開啟檔且非編輯中,重抓內容(看 agent 改後的結果)。
+  // 重新整理:重載樹 + 重抓目前開啟檔內容(看 agent 改後結果)。編輯模式也重載,
+  // 但有「未儲存編輯」時略過以免蓋掉(先存或取消)。圖片以 reloadSeq cache-bust。
   const refresh = () => {
     reloadTree();
-    if (sel && !editing) {
-      const path = sel.path;
-      api
-        .file(repo, path)
-        .then((f) => setSel({ path, content: f.content, markdown: f.markdown }))
-        .catch((e: Error) => setErr(e.message));
+    if (!sel) return;
+    if (editing && draftRef.current !== sel.content) {
+      setNote('內容已可能被外部改動,但有未儲存編輯 → 未重載(請先儲存或取消編輯)');
+      return;
     }
+    if (sel.image) {
+      setReloadSeq((n) => n + 1); // 圖片:換 src cache-bust 重抓
+      return;
+    }
+    const path = sel.path;
+    api
+      .file(repo, path)
+      .then((f) => {
+        setSel({ path, content: f.content, markdown: f.markdown });
+        setCurrentFile({ path, content: f.content });
+        if (editing) setDraftSync(f.content); // 同步編輯草稿
+        setReloadSeq((n) => n + 1); // 換 key 讓 CM6 編輯器以新內容 remount
+      })
+      .catch((e: Error) => setErr(e.message));
   };
 
   // 新檔:只填名,建在 baseDir 下(可含子路徑)。
@@ -673,6 +688,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     selPath,
     selectedKeys,
     folderView,
+    reloadSeq,
     openPath: (p: string) =>
       window.dispatchEvent(new CustomEvent('porthole:navigate', { detail: { repo, path: p } })),
     loadingFile,
@@ -961,7 +977,7 @@ export function ExplorePreview() {
         {c.editing && c.sel ? (
           c.sel.markdown ? (
             <Suspense fallback={<Spin />}>
-              <MarkdownEditor key={c.sel.path} value={c.draft} onChange={c.setDraft} />
+              <MarkdownEditor key={`${c.sel.path}:${c.reloadSeq}`} value={c.draft} onChange={c.setDraft} />
             </Suspense>
           ) : (
             <Input.TextArea
@@ -1040,7 +1056,7 @@ export function ExplorePreview() {
           <Empty description="選一個檔案預覽" />
         ) : c.sel.image ? (
           <img
-            src={api.rawUrl(c.repo, c.sel.path)}
+            src={`${api.rawUrl(c.repo, c.sel.path)}&v=${c.reloadSeq}`}
             alt={c.sel.path}
             style={{ maxWidth: '100%', height: 'auto', display: 'block' }}
             data-loc="explore:image"
