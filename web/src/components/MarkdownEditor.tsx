@@ -258,6 +258,7 @@ function showFlowMenu(x: number, y: number, onPick: (code: string) => void) {
   menu.style.cssText =
     'position:fixed;z-index:1500;background:#fff;border:1px solid #d9d9d9;border-radius:6px;' +
     'box-shadow:0 2px 8px rgba(0,0,0,.15);padding:4px;font-size:13px;' +
+    'max-height:calc(100vh - 16px);overflow-y:auto;' +
     `left:${x}px;top:${y}px;`;
   const head = document.createElement('div');
   head.textContent = '插入圖表(GUI 可編輯)';
@@ -278,6 +279,12 @@ function showFlowMenu(x: number, y: number, onPick: (code: string) => void) {
     menu.appendChild(item);
   }
   document.body.appendChild(menu);
+  // 夾在視窗內:超出右/下邊 → 往左/上對齊(避免靠近底部時被切掉)。
+  const rect = menu.getBoundingClientRect();
+  const left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+  const top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
   flowMenu = menu;
   document.addEventListener('mousedown', onDocMouseDown);
   document.addEventListener('keydown', onDocKeyDown);
