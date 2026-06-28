@@ -57,6 +57,7 @@ import { setCurrentFile } from '../lib/currentFile';
 
 // CM6 編輯器較重 → lazy load(守「薄」)。mermaid/FlowEditor 在 MermaidBlock 內按需載入。
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor'));
+const ExcalidrawEditor = lazy(() => import('../components/ExcalidrawEditor'));
 
 type Node = TreeDataNode & { path: string; isLeaf: boolean };
 
@@ -66,10 +67,12 @@ interface Selected {
   markdown: boolean;
   isNew?: boolean; // 新檔尚未存到磁碟
   image?: boolean; // 圖片檔(以 <img> 預覽,不抓文字內容)
+  excalidraw?: boolean; // .excalidraw 檔(自由白板,以 Excalidraw 編輯器開)
 }
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i;
 const isImage = (p: string) => IMAGE_EXT.test(p);
+const isExcalidraw = (p: string) => /\.excalidraw$/i.test(p);
 
 function toNode(item: { name: string; path: string; type: 'dir' | 'file' }): Node {
   return {
@@ -144,6 +147,7 @@ interface ExploreCtx {
   folderView: { path: string; items: Node[]; readmePath: string | null; readme: string | null } | null;
   openPath: (path: string) => void; // 導航到 repo 內路徑(grid 點擊 / 程式導航)
   reloadSeq: number; // refresh 重載序號(編輯器 key / 圖片 cache-bust)
+  saveFileContent: (content: string) => Promise<void>; // 直接寫檔(Excalidraw 存檔)
   loadingFile: boolean;
   drawerOpen: boolean;
   setDrawerOpen: (b: boolean) => void;
@@ -361,7 +365,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setLoadingFile(true);
     try {
       const f = await api.file(repo, n.path);
-      setSel({ path: n.path, content: f.content, markdown: f.markdown });
+      setSel({ path: n.path, content: f.content, markdown: f.markdown, excalidraw: isExcalidraw(n.path) });
       setCurrentFile({ path: n.path, content: f.content }); // 供 ContentPick 推算行號
       setDrawerOpen(false); // 手機:選檔後關抽屜露出預覽
     } catch (e) {
@@ -420,7 +424,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
         setFolderView(null);
         setEditing(false);
         setErr(null);
-        setSel({ path: p, content: f.content, markdown: f.markdown });
+        setSel({ path: p, content: f.content, markdown: f.markdown, excalidraw: isExcalidraw(p) });
         setCurrentFile({ path: p, content: f.content });
         setSelPath(p);
         setBaseDir(parentDir(p));
@@ -578,6 +582,27 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       .catch((e: Error) => setErr(e.message));
   };
 
+  // 直接把內容寫進目前開啟檔(Excalidraw 等非文字編輯器存檔用,不走 draft)。
+  const saveFileContent = useCallback(
+    async (content: string) => {
+      const cur = sel;
+      if (!cur) return;
+      setSaving(true);
+      setSaveErr(null);
+      try {
+        await api.writeFile(repo, cur.path, content);
+        setSel({ ...cur, content, isNew: false });
+        setCurrentFile({ path: cur.path, content });
+        setNote(`已儲存 ${cur.path}`);
+      } catch (e) {
+        setSaveErr((e as Error).message);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [sel, repo],
+  );
+
   // 新檔:只填名,建在 baseDir 下(可含子路徑)。
   const createNew = () => {
     const name = newPath.trim().replace(/^[/\\]+/, '');
@@ -589,7 +614,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setErr(null);
     setNote(null);
     setSaveErr(null);
-    setSel({ path: p, content: '', markdown: isMd(p), isNew: true });
+    setSel({ path: p, content: '', markdown: isMd(p), isNew: true, excalidraw: isExcalidraw(p) });
     setSelPath(p);
     setDraftSync('');
     setEditing(true);
@@ -722,6 +747,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     onLoadData,
     onSelect,
     refresh,
+    saveFileContent: (content: string) => saveFileContent(content),
     startEdit,
     cancelEdit,
     save: () => void save(),
@@ -932,6 +958,7 @@ export function ExplorePreview() {
           </Typography.Text>
           {c.sel &&
             !c.sel.image &&
+            !c.sel.excalidraw &&
             (c.editing ? (
               <Space.Compact>
                 <Button
@@ -970,8 +997,8 @@ export function ExplorePreview() {
         style={{
           flex: 1,
           minWidth: 0,
-          overflow: c.editing && c.sel?.markdown ? 'hidden' : 'auto',
-          padding: c.editing && c.sel?.markdown ? 0 : 16,
+          overflow: (c.editing && c.sel?.markdown) || c.sel?.excalidraw ? 'hidden' : 'auto',
+          padding: (c.editing && c.sel?.markdown) || c.sel?.excalidraw ? 0 : 16,
         }}
       >
         {c.editing && c.sel ? (
@@ -1054,6 +1081,15 @@ export function ExplorePreview() {
           </div>
         ) : !c.sel ? (
           <Empty description="選一個檔案預覽" />
+        ) : c.sel.excalidraw ? (
+          <Suspense fallback={<Spin />}>
+            <ExcalidrawEditor
+              key={`${c.sel.path}:${c.reloadSeq}`}
+              code={c.sel.content}
+              onSave={(json) => void c.saveFileContent(json)}
+              fill
+            />
+          </Suspense>
         ) : c.sel.image ? (
           <img
             src={`${api.rawUrl(c.repo, c.sel.path)}&v=${c.reloadSeq}`}
