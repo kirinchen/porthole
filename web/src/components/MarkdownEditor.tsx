@@ -22,7 +22,7 @@ import {
 } from '@codemirror/view';
 import { EditorState, StateField, type Range } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
-import { syntaxTree } from '@codemirror/language';
+import { syntaxTree, ensureSyntaxTree } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
@@ -130,7 +130,11 @@ class FenceWidget extends WidgetType {
 function buildFenceDecos(state: EditorState): DecorationSet {
   const ranges: Range<Decoration>[] = [];
   const counter: Record<FenceLang, number> = { mermaid: 0, d2: 0, excalidraw: 0 }; // 同語言各自計數
-  syntaxTree(state).iterate({
+  // CM6 預設只增量解析到 viewport 附近;若不強制解析整份,初始 viewport 之下的
+  // 第二個 ```mermaid / d2 / excalidraw fence 不在語法樹裡 → 掃不到、顯示成原始 fence
+  // 文字,要打字觸發重解析才出現。先 ensureSyntaxTree 把整份解析完(逾時才退回部分樹)。
+  const tree = ensureSyntaxTree(state, state.doc.length, 5000) ?? syntaxTree(state);
+  tree.iterate({
     enter: (node) => {
       if (node.name === 'FencedCode') {
         const lang = fenceInfo(state, node.node);
