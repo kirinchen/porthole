@@ -73,6 +73,9 @@ export default function ExcalidrawBlock({ code, onApply, sessionKey }: Props) {
       )
       .then((el) => {
         if (!alive) return;
+        // 讓預覽 SVG 隨容器縮放:保留 viewBox 比例,寬度不超過容器(避免場景原始寬度
+        // 太大 → 長橫向 scroll),也不放大超過原尺寸。
+        el.setAttribute('style', `${el.getAttribute('style') ?? ''};max-width:100%;height:auto;`);
         setSvg(el.outerHTML);
       })
       .catch((e) => {
