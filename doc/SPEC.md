@@ -87,7 +87,7 @@ Chat / Session / CLI,**保活不卸載**(切走不斷 session 終端 WS)。中�
 - 點**資料夾** → 中央顯示該夾內容 grid(可點:檔案開檔、子夾鑽入)+ 其 `README.md`(若有,case-insensitive)渲染於下。
 - **編輯**:預覽區「編輯」鈕 → markdown 走 CM6 Obsidian 式 live-preview、其他純 textarea → 儲存(`PUT /api/:repo/file`)。「儲存」鈕存檔並回預覽;**Ctrl/Cmd+S** 存檔但**不離開編輯**(派 `porthole:save-file`,讀 draftRef)。
 - **@/# 自動完成**(CM6 編輯):打 `@` 選檔(以**目前編輯檔目錄**為基準、lazy 逐層、資料夾續查、`../` 往上夾在 repo root)、`#` 選章節(`@file#` 取該檔標題 / 單獨 `#` 取目前檔標題),可混用 `@abc.md#chat1`(`lib/mentionComplete`)。
-- **新增**:檔案樹「新檔」鈕 → 輸入相對路徑(中間目錄自動建立)→ 編輯後儲存。
+- **新增**:檔案樹「新檔」鈕 → 輸入相對路徑(中間目錄自動建立)→ 編輯後儲存。輸入框打 `.` 出副檔名 smart hint(VSCode 式,md / excalidraw 等);新建 `.excalidraw` 直接開白板編輯器(非文字),首存後補進樹。
 - **樹節點動作**(hover 圖示,檔案 / 資料夾皆有):改名(同層)、**移動到資料夾**(TreeSelect lazy 只列資料夾 → 換目錄,沿用 `POST /api/:repo/rename {from,to}`,雙路徑 path-guard、目標已存在回 409;移動資料夾時擋自身/子孫不可為目標)、刪除(資料夾連內容)。開啟檔或其祖先夾被改名 / 移動 → 同步更新 `sel`/網址 / 樹反白並展開新位置。
 - 寫入受 path-guard 鎖在 active repo root 內(見 §2 寫入面)。
 - **mermaid**:
