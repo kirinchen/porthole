@@ -89,10 +89,14 @@ function rightCardToken(c: Card): string {
   }
 }
 
+// 實體名字元類:Unicode 字母 / 數字 / _ / -(吃中文等非 ASCII 名,否則整個實體被丟掉)。
+const NAME = '[\\p{L}\\p{N}_-]+';
 // 關係行:LEFT <leftCard><line><rightCard> RIGHT : label
 // leftCard ∈ {|o,||,}o,}|}  line ∈ {--,..}  rightCard ∈ {o|,||,o{,|{}
-const REL_RE =
-  /^([A-Za-z0-9_]+)\s+(\|o|\|\||\}o|\}\|)(--|\.\.)(o\||\|\||o\{|\|\{)\s+([A-Za-z0-9_]+)(?:\s*:\s*(.*))?$/;
+const REL_RE = new RegExp(
+  `^(${NAME})\\s+(\\|o|\\|\\||\\}o|\\}\\|)(--|\\.\\.)(o\\||\\|\\||o\\{|\\|\\{)\\s+(${NAME})(?:\\s*:\\s*(.*))?$`,
+  'u',
+);
 
 /** 解析單個屬性行:`TYPE NAME [PK|FK|UK ...] ["comment"]`。回傳 null 表示無法解析。 */
 function parseAttrLine(line: string): ErdAttr | null {
@@ -154,8 +158,8 @@ export function parseErd(code: string): ErdModel {
       continue;
     }
 
-    // 實體區塊開頭:`NAME {`。
-    const open = /^([A-Za-z0-9_]+)\s*\{$/.exec(line);
+    // 實體區塊開頭:`NAME {`(NAME 支援中文等非 ASCII)。
+    const open = new RegExp(`^(${NAME})\\s*\\{$`, 'u').exec(line);
     if (open) {
       current = ensureEntity(open[1]);
       continue;
