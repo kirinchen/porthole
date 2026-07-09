@@ -108,6 +108,10 @@ class FenceWidget extends WidgetType {
   }
   toDOM(view: EditorView) {
     const dom = document.createElement('div');
+    // flow-root:建立 BFC,讓子元件(MermaidBlock 等)的上下 margin 計入本 widget
+    // 的量測高度,不再 collapse 到 widget 之外。否則 CM6 量測不含該 margin,widget
+    // 下方每一行的座標會累積偏移 → 點擊落到下一行、該行無法編輯。
+    dom.style.display = 'flow-root';
     dom.setAttribute('data-loc', `explore:edit:${this.lang}`);
     const root = createRoot(dom);
     root.render(
