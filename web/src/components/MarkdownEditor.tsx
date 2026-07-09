@@ -102,6 +102,10 @@ class FenceWidget extends WidgetType {
   eq(o: FenceWidget) {
     return o.lang === this.lang && o.code === this.code && o.index === this.index;
   }
+  // 圖型渲染完/切 tab 前的初估高度(供 CM6 建高度圖;實際高度由 ResizeObserver 校正)。
+  get estimatedHeight() {
+    return 320;
+  }
   toDOM(view: EditorView) {
     const dom = document.createElement('div');
     dom.setAttribute('data-loc', `explore:edit:${this.lang}`);
@@ -114,12 +118,19 @@ class FenceWidget extends WidgetType {
         sessionKey: `${this.lang}:${this.index}`,
       }),
     );
-    (dom as unknown as { _root: Root })._root = root;
+    // mermaid/d2/excalidraw 為非同步渲染,widget 掛載後高度才確定;若不通知 CM6
+    // 重新量測,其高度圖會過時 → widget 下方各行的座標↔位置對映偏掉(點該行游標
+    // 落到別行、打字進錯行)。以 ResizeObserver 在高度變動時 requestMeasure 校正。
+    const ro = new ResizeObserver(() => view.requestMeasure());
+    ro.observe(dom);
+    (dom as unknown as { _root: Root; _ro: ResizeObserver })._root = root;
+    (dom as unknown as { _root: Root; _ro: ResizeObserver })._ro = ro;
     return dom;
   }
   destroy(dom: HTMLElement) {
-    const root = (dom as unknown as { _root?: Root })._root;
-    if (root) setTimeout(() => void root.unmount(), 0); // 避免在 render 期間 unmount
+    const d = dom as unknown as { _root?: Root; _ro?: ResizeObserver };
+    d._ro?.disconnect();
+    if (d._root) setTimeout(() => void d._root!.unmount(), 0); // 避免在 render 期間 unmount
   }
   ignoreEvent() {
     return true; // widget 自行處理互動,不當成編輯器事件
