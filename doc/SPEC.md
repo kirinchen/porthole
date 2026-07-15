@@ -86,6 +86,7 @@ Chat / Session / CLI,**保活不卸載**(切走不斷 session 終端 WS)。中�
 - 點檔案 → 右側預覽(markdown 走 remark/rehype 渲染;圖片(png/jpg/gif/webp/svg/bmp/ico/avif)以 `<img>` 顯示,來源 `GET /api/:repo/raw`(path-guard、依副檔名給 content-type);**`.excalidraw`** 以 Excalidraw 白板編輯器開(自由繪圖,Google Drawing 式;存檔 serializeAsJSON 寫回 JSON,Ctrl+S / 儲存鈕;`@excalidraw/excalidraw` lazy 載入);**`.env`(含 `.env.*` / `*.env`)** 預覽美化成 KEY/VALUE 表(`EnvView`:註解分段、值可一鍵複製 / 整體遮罩,編輯仍走原始 textarea 不破壞格式);其他純文字)。
 - 點**資料夾** → 中央顯示該夾內容 grid(可點:檔案開檔、子夾鑽入)+ 其 `README.md`(若有,case-insensitive)渲染於下。
 - **編輯**:預覽區「編輯」鈕 → markdown 走 CM6 Obsidian 式 live-preview、其他純 textarea → 儲存(`PUT /api/:repo/file`)。「儲存」鈕存檔並回預覽;**Ctrl/Cmd+S** 存檔但**不離開編輯**(派 `porthole:save-file`,讀 draftRef)。
+- **目錄(outline)**:markdown 預覽工具列「編輯」鈕旁的目錄鈕(`Outline`)→ click 展開 Popover 列出全部 ATX 標題(h1–h6,依層級縮排),點某項捲動到該標題。跳轉靠「第 N 個標題 ↔ preview 第 N 個 heading 元素」對位(`parseHeadings` 與渲染皆跳過 fenced code),免 heading id / rehype-slug、不怕重複標題。
 - **@/# 自動完成**(CM6 編輯):打 `@` 選檔(以**目前編輯檔目錄**為基準、lazy 逐層、資料夾續查、`../` 往上夾在 repo root)、`#` 選章節(`@file#` 取該檔標題 / 單獨 `#` 取目前檔標題),可混用 `@abc.md#chat1`(`lib/mentionComplete`)。
 - **新增**:檔案樹「新檔」鈕 → 輸入相對路徑(中間目錄自動建立)→ 編輯後儲存。輸入框打 `.` 出副檔名 smart hint(VSCode 式,md / excalidraw 等);新建 `.excalidraw` 直接開白板編輯器(非文字),首存後補進樹。
 - **樹節點動作**(hover 圖示,檔案 / 資料夾皆有):改名(同層)、**移動到資料夾**(TreeSelect lazy 只列資料夾 → 換目錄,沿用 `POST /api/:repo/rename {from,to}`,雙路徑 path-guard、目標已存在回 409;移動資料夾時擋自身/子孫不可為目標)、刪除(資料夾連內容)。開啟檔或其祖先夾被改名 / 移動 → 同步更新 `sel`/網址 / 樹反白並展開新位置。
