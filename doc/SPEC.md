@@ -112,6 +112,9 @@ Chat / Session / CLI,**保活不卸載**(切走不斷 session 終端 WS)。中�
   - **編輯**:每個 ```d2 block 換成互動 box(預覽 / 編輯 / GUI),與 mermaid 共用 CM6 widget 機制(`FenceWidget`,每語言各自計數);套用直接改寫文件。
   - **GUI 編輯器**(`lib/d2` + `D2Editor`,React Flow + dagre):container(可巢狀,可當邊端點)+ shape + 邊(4 種箭頭 + label);container 與 shape 四邊皆有接點。擋 D2 layout 非法邊(自連、container↔後代/祖先)。序列化 id 自動處理 D2 保留字 / 特殊字元引號。
   - 子集:style/class/sql_table/icon/near 等進階語法退回純文字編輯。
+- **表格(GFM table GUI)**(`lib/mdTable` + `TableBlock`):CM6 編輯時每個**行首** GFM 表格換成試算表式 grid widget(沿用 `Table` lezer 擴充 + block widget 機制,與 mermaid/d2 同計數對位);可直接改 cell、加/刪列與欄、切每欄對齊(左/中/右);「原始碼」tab 直接編 pipe 語法,無法解析時顯示錯誤(不靜默丟棄 / 不假存)。空白行右鍵選單「＋ 表格」一鍵插入。
+  - **寫回策略**:cell 打字只改本地 model(不動文件 → 不 remount → 不掉焦);flush(失焦離開 widget / Ctrl+S)才序列化寫回;結構變更(加刪列欄、對齊)即時寫回(離散動作,不依賴焦點)。序列化逐欄補寬對齊、`\|` 逸出。
+  - **邊界**:只 widget 化行首表格 —— blockquote(`> `)/ 清單縮排內的表格保留純文字編輯(避免連前綴一起換掉而破壞結構)。預覽(非編輯)仍以 react-markdown + remark-gfm 渲染 HTML `<table>`。
 
 ### 4.2 Chat
 - 透過 `claude -p` 跟 active repo 的 agent 對話(coral → coral 前台助理)。

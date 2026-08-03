@@ -603,9 +603,12 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setSaving(true);
     setSaveErr(null);
     try {
-      await api.writeFile(repo, sel.path, draft);
+      // 讀 draftRef(同步最新)而非 draft state:GUI 編輯器(如表格)可能剛在
+      // 失焦時才寫回 draft,draft state 尚未 re-render;draftRef 一律最新。
+      const latest = draftRef.current;
+      await api.writeFile(repo, sel.path, latest);
       const wasNew = sel.isNew;
-      setSel({ ...sel, content: draft, isNew: false });
+      setSel({ ...sel, content: latest, isNew: false });
       setEditing(false);
       setNote(`已儲存 ${sel.path}`);
       if (wasNew) reloadTree(); // 新檔 → 重載樹讓它出現

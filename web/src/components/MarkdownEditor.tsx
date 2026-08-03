@@ -24,6 +24,7 @@ import { EditorState, StateField, type Range } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { syntaxTree, ensureSyntaxTree } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
+import { Table } from '@lezer/markdown';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { mentionCompletionSource } from '../lib/mentionComplete';
@@ -31,6 +32,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import MermaidBlock from './MermaidBlock';
 import D2Block from './D2Block';
 import ExcalidrawBlock from './ExcalidrawBlock';
+import TableBlock from './TableBlock';
 import { getCurrentFile } from '../lib/currentFile';
 import { resolveLink } from '../lib/pathLink';
 
@@ -90,6 +92,74 @@ function applyFenceBlock(view: EditorView, lang: FenceLang, index: number, newCo
   view.dispatch({ changes: { from: range.from, to: range.to, insert } });
 }
 
+/** 找第 index 個 GFM Table 的整塊 from/to(以「行」為界,與渲染順序一致)。 */
+function findTableBlock(state: EditorState, index: number): { from: number; to: number } | null {
+  let i = 0;
+  let found: { from: number; to: number } | null = null;
+  syntaxTree(state).iterate({
+    enter: (node) => {
+      if (node.name === 'Table') {
+        if (i === index) {
+          found = { from: state.doc.lineAt(node.from).from, to: state.doc.lineAt(node.to).to };
+        }
+        i++;
+        return false;
+      }
+      return undefined;
+    },
+  });
+  return found;
+}
+
+/** 表格 GUI 套用 → 改寫文件中對應 Table 區塊。 */
+function applyTableBlock(view: EditorView, index: number, newCode: string): void {
+  const range = findTableBlock(view.state, index);
+  if (!range) return;
+  view.dispatch({ changes: { from: range.from, to: range.to, insert: newCode.replace(/\s+$/, '') } });
+}
+
+/** GFM 表格 → GUI 編輯 widget(React root 掛進 CM6 block widget)。 */
+class TableWidget extends WidgetType {
+  constructor(
+    readonly code: string,
+    readonly index: number,
+  ) {
+    super();
+  }
+  eq(o: TableWidget) {
+    return o.code === this.code && o.index === this.index;
+  }
+  get estimatedHeight() {
+    return 160;
+  }
+  toDOM(view: EditorView) {
+    const dom = document.createElement('div');
+    // flow-root:同 FenceWidget,建 BFC 讓子元件 margin 計入量測高度,避免下方行點擊偏移。
+    dom.style.display = 'flow-root';
+    dom.setAttribute('data-loc', 'explore:edit:table');
+    const root = createRoot(dom);
+    root.render(
+      createElement(TableBlock, {
+        code: this.code,
+        onApply: (nc: string) => applyTableBlock(view, this.index, nc),
+      }),
+    );
+    const ro = new ResizeObserver(() => view.requestMeasure());
+    ro.observe(dom);
+    (dom as unknown as { _root: Root; _ro: ResizeObserver })._root = root;
+    (dom as unknown as { _root: Root; _ro: ResizeObserver })._ro = ro;
+    return dom;
+  }
+  destroy(dom: HTMLElement) {
+    const d = dom as unknown as { _root?: Root; _ro?: ResizeObserver };
+    d._ro?.disconnect();
+    if (d._root) setTimeout(() => void d._root!.unmount(), 0);
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
+
 /** 把圖型 block(mermaid / d2)渲染成互動 box(React root 掛進 CM6 widget)。 */
 class FenceWidget extends WidgetType {
   constructor(
@@ -141,12 +211,13 @@ class FenceWidget extends WidgetType {
   }
 }
 
-/** 圖型 block widget 是 block / 跨行 replace → 只能走 StateField(不可由 plugin 提供)。 */
+/** 圖型 / 表格 block widget 是 block / 跨行 replace → 只能走 StateField(不可由 plugin 提供)。 */
 function buildFenceDecos(state: EditorState): DecorationSet {
   const ranges: Range<Decoration>[] = [];
   const counter: Record<FenceLang, number> = { mermaid: 0, d2: 0, excalidraw: 0 }; // 同語言各自計數
+  let tableIdx = 0; // GFM 表格各自計數
   // CM6 預設只增量解析到 viewport 附近;若不強制解析整份,初始 viewport 之下的
-  // 第二個 ```mermaid / d2 / excalidraw fence 不在語法樹裡 → 掃不到、顯示成原始 fence
+  // 第二個 ```mermaid / d2 / excalidraw fence 或表格 不在語法樹裡 → 掃不到、顯示成原始
   // 文字,要打字觸發重解析才出現。先 ensureSyntaxTree 把整份解析完(逾時才退回部分樹)。
   const tree = ensureSyntaxTree(state, state.doc.length, 5000) ?? syntaxTree(state);
   tree.iterate({
@@ -163,6 +234,21 @@ function buildFenceDecos(state: EditorState): DecorationSet {
           );
           counter[l]++;
         }
+        return false;
+      }
+      if (node.name === 'Table') {
+        const from = state.doc.lineAt(node.from).from;
+        // 只 widget 化「行首」表格:blockquote(`> `)/ 清單縮排內的表格,node.from 會
+        // 落在行首之後(前綴之後)。若連同前綴整行換成 widget,切出的原始碼含 `> ` →
+        // 解析失敗變空 grid、寫回又丟前綴 → 摧毀 blockquote/list。這類巢狀表格保留純文字。
+        if (node.from === from) {
+          const to = state.doc.lineAt(node.to).to;
+          const code = state.doc.sliceString(from, to);
+          ranges.push(
+            Decoration.replace({ widget: new TableWidget(code, tableIdx), block: true }).range(from, to),
+          );
+        }
+        tableIdx++; // 巢狀表格也計數,與 findTableBlock(計數全部 Table)對齊 index
         return false;
       }
       return undefined;
@@ -251,6 +337,11 @@ const GUI_SAMPLES: { label: string; code: string }[] = [
     // Excalidraw:自由白板(Google Drawing 式),GUI tab 開白板編輯。空白起手。
     label: '＋ Excalidraw 白板',
     code: ['```excalidraw', '{"type":"excalidraw","version":2,"source":"porthole","elements":[],"appState":{},"files":{}}', '```'].join('\n'),
+  },
+  {
+    // GFM 表格:插入後由 TableWidget 接手成 GUI 試算表編輯。
+    label: '＋ 表格',
+    code: ['| 欄位 1 | 欄位 2 | 欄位 3 |', '| --- | --- | --- |', '| | | |'].join('\n'),
   },
 ];
 
@@ -403,6 +494,8 @@ function buildDecorations(view: EditorView): DecorationSet {
         // 圖型 block(mermaid / d2)由 widget 接手,行內樣式跳過(否則與 block 裝飾重疊)。
         if (name === 'FencedCode' && (FENCE_LANGS as readonly string[]).includes(fenceInfo(view.state, node.node)))
           return false;
+        // 表格由 TableWidget 接手 → 行內樣式跳過(整塊被 widget 取代)。
+        if (name === 'Table') return false;
 
         const h = /^ATXHeading([1-6])$/.exec(name);
         if (h) {
@@ -493,7 +586,8 @@ export default function MarkdownEditor({ value, onChange }: Props) {
         extensions: [
           history(),
           keymap.of([...completionKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
-          markdown(),
+          // Table 擴充:讓 GFM 表格進語法樹 → 由 TableWidget 取代成 GUI 編輯器。
+          markdown({ extensions: [Table] }),
           // @ 選檔 / # 選章節 自動完成(可混用 @file#section)
           autocompletion({ override: [mentionCompletionSource], icons: false }),
           EditorView.lineWrapping,
