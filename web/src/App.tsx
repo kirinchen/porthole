@@ -156,10 +156,11 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  // tab → URL hash(切 tab 只改 hash,不灌歷史)
+  // tab → URL hash(切 tab 只改 hash,不灌歷史)。保留 location.search(?sec= 章節 deep-link),
+  // 否則切 tab 會把章節錨點從網址抹掉。
   useEffect(() => {
     if (location.hash !== `#${tab}`) {
-      history.replaceState(null, '', `${location.pathname}#${tab}`);
+      history.replaceState(null, '', `${location.pathname}${location.search}#${tab}`);
     }
   }, [tab]);
 

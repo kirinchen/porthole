@@ -87,6 +87,7 @@ Chat / Session / CLI,**保活不卸載**(切走不斷 session 終端 WS)。中�
 - 點**資料夾** → 中央顯示該夾內容 grid(可點:檔案開檔、子夾鑽入)+ 其 `README.md`(若有,case-insensitive)渲染於下。
 - **編輯**:預覽區「編輯」鈕 → markdown 走 CM6 Obsidian 式 live-preview、其他純 textarea → 儲存(`PUT /api/:repo/file`)。「儲存」鈕存檔並回預覽;**Ctrl/Cmd+S** 存檔但**不離開編輯**(派 `porthole:save-file`,讀 draftRef)。
 - **目錄(outline)**:markdown 預覽工具列「編輯」鈕旁的目錄鈕(`Outline`)→ click 展開 Popover 列出全部 ATX 標題(h1–h6,依層級縮排),點某項捲動到該標題。跳轉靠「第 N 個標題 ↔ preview 第 N 個 heading 元素」對位(`parseHeadings` 與渲染皆跳過 fenced code),免 heading id / rehype-slug、不怕重複標題。
+- **章節定位錨點(GitHub 式)**:預覽標題 hover 顯示左側 `#` 錨點(`lib/heading` + `Markdown headingAnchors`)。標題設 `id` / `data-heading-slug`(slug 規則與 `#section` 自動完成一致 —— 去 inline markdown、空白→`-`、保留中文;同名標題補 `-1`/`-2` 序號)。點錨點 → 平滑捲動 + 短暫高亮 + 網址列更新為可分享的 `?sec=<slug>` deep-link(保留 `#tab`)+ 複製完整 URL 到剪貼簿。**deep-link**:開啟帶 `?sec=` 的網址(初次載入 / 連結導航 / 上一頁)→ 渲染後自動捲到該章節(`scrollSectionWhenReady`,rAF 重試,換檔即中止)。**站內 `#slug` 連結**(含 `#` 自動完成插入的章節連結):同檔直接捲動不重載;`?sec=` 在 tab 切換間保留(`App` tab→hash effect 保留 `location.search`)。
 - **@/# 自動完成**(CM6 編輯):打 `@` 選檔(以**目前編輯檔目錄**為基準、lazy 逐層、資料夾續查、`../` 往上夾在 repo root)、`#` 選章節(`@file#` 取該檔標題 / 單獨 `#` 取目前檔標題),可混用 `@abc.md#chat1`(`lib/mentionComplete`)。
 - **新增**:檔案樹「新檔」鈕 → 輸入相對路徑(中間目錄自動建立)→ 編輯後儲存。輸入框打 `.` 出副檔名 smart hint(VSCode 式,md / excalidraw 等);新建 `.excalidraw` 直接開白板編輯器(非文字),首存後補進樹。
 - **樹節點動作**(hover 圖示,檔案 / 資料夾皆有):改名(同層)、**移動到資料夾**(TreeSelect lazy 只列資料夾 → 換目錄,沿用 `POST /api/:repo/rename {from,to}`,雙路徑 path-guard、目標已存在回 409;移動資料夾時擋自身/子孫不可為目標)、刪除(資料夾連內容)。開啟檔或其祖先夾被改名 / 移動 → 同步更新 `sel`/網址 / 樹反白並展開新位置。

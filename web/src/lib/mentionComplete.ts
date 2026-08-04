@@ -18,6 +18,7 @@ import type { EditorView } from '@codemirror/view';
 import { api, type TreeItem } from './api';
 import { getCurrentFile } from './currentFile';
 import { normalizePath } from './pathLink';
+import { slugifyHeading, dedupeSlug } from './heading';
 
 function repoFromUrl(): string {
   return decodeURIComponent(location.pathname.split('/').filter(Boolean)[0] ?? '');
@@ -36,11 +37,6 @@ function resolveFromCurrent(rel: string): string {
   return normalizePath(base ? `${base}/${rel}` : rel);
 }
 
-/** 標題 → 單一 token slug(空白收成 -,保留中文等)。 */
-function slugifyHeading(h: string): string {
-  return h.trim().replace(/\s+/g, '-');
-}
-
 /** query → 要列的目錄(相對 repo root)+ 過濾 prefix。 */
 function splitQuery(query: string): { dir: string; prefix: string } {
   const slash = query.lastIndexOf('/');
@@ -48,10 +44,24 @@ function splitQuery(query: string): { dir: string; prefix: string } {
   return { dir: query.slice(0, slash) || '.', prefix: query.slice(slash + 1) };
 }
 
-/** 從 markdown 取 ATX 標題文字(h1–h6)。 */
+/** 從 markdown 取 ATX 標題文字(h1–h6),跳過 fenced code 區塊(與預覽渲染的標題集對齊)。 */
 function headingsFromMarkdown(md: string): string[] {
   const out: string[] = [];
+  let inFence = false;
+  let fenceChar = '';
   for (const line of md.split('\n')) {
+    const fm = /^\s*(```+|~~~+)/.exec(line);
+    if (fm) {
+      const ch = fm[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = ch;
+      } else if (ch === fenceChar) {
+        inFence = false;
+      }
+      continue;
+    }
+    if (inFence) continue;
     const m = /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
     if (m) out.push(m[1].trim());
   }
@@ -69,9 +79,12 @@ function applyFolder(name: string) {
 
 function sectionResult(from: number, heads: string[], query: string): CompletionResult {
   const q = query.toLowerCase();
+  // 依文件序去重 slug(與 Markdown 錨點同規則),再依 query 過濾 → apply 值與錨點對齊。
+  const seen = new Map<string, number>();
   const options: Completion[] = heads
-    .filter((h) => slugifyHeading(h).toLowerCase().includes(q) || h.toLowerCase().includes(q))
-    .map((h) => ({ label: h, type: 'property', apply: slugifyHeading(h) }));
+    .map((h) => ({ h, slug: dedupeSlug(slugifyHeading(h), seen) }))
+    .filter(({ h, slug }) => slug.toLowerCase().includes(q) || h.toLowerCase().includes(q))
+    .map(({ h, slug }) => ({ label: h, type: 'property', apply: slug }));
   return { from, options, validFor: /^[^\s#@]*$/ };
 }
 

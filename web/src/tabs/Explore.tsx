@@ -58,6 +58,7 @@ import { api } from '../lib/api';
 import Markdown from '../components/Markdown';
 import EnvView from '../components/EnvView';
 import Outline from '../components/Outline';
+import { scrollToHeadingSlug } from '../lib/heading';
 import { setCurrentFile } from '../lib/currentFile';
 
 // CM6 編輯器較重 → lazy load(守「薄」)。mermaid/FlowEditor 在 MermaidBlock 內按需載入。
@@ -301,7 +302,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     readmePath: string | null;
     readme: string | null;
   } | null>(null);
-  const pendingNavRef = useRef<{ path: string; tab?: string } | null>(null); // 跨 repo 連結待開
+  const pendingNavRef = useRef<{ path: string; tab?: string; section?: string } | null>(null); // 跨 repo 連結待開
   const didInitNav = useRef(false); // 初次載入是否已依 URL 開檔
   const [reloadSeq, setReloadSeq] = useState(0); // refresh 重載編輯器/圖片(換 key / cache-bust)
   const [loadingFile, setLoadingFile] = useState(false);
@@ -370,11 +371,15 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
         if (!want && !didInitNav.current) {
           const segs = location.pathname.split('/').filter(Boolean).map((s) => decodeURIComponent(s));
           if (segs.length > 1) {
-            want = { path: segs.slice(1).join('/'), tab: location.hash.replace(/^#/, '') || undefined };
+            want = {
+              path: segs.slice(1).join('/'),
+              tab: location.hash.replace(/^#/, '') || undefined,
+              section: new URLSearchParams(location.search).get('sec') || undefined, // deep-link 章節
+            };
           }
         }
         didInitNav.current = true;
-        if (want?.path) void navigateTo(want.path, want.tab, false); // 初次/deep-link → 不新增歷史
+        if (want?.path) void navigateTo(want.path, want.tab, false, want.section); // 初次/deep-link → 不新增歷史
       })
       .catch((e: Error) => setErr(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -390,16 +395,36 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
 
   // 把網址列同步成 /<repo>/<path>#<tab>。push=true → 新增歷史一筆(可上一頁);否則取代。
   const writeUrl = useCallback(
-    (path: string, tab?: string, push = false) => {
+    (path: string, tab?: string, push = false, section?: string) => {
       const TABS = ['explore', 'chat', 'session', 'cli'];
       const t = tab && TABS.includes(tab) ? tab : location.hash.replace(/^#/, '') || 'explore';
       const enc = path.split('/').map(encodeURIComponent).join('/');
-      const url = `/${encodeURIComponent(repo)}/${enc}#${t}`;
-      if (push && location.pathname + location.hash !== url) history.pushState(null, '', url);
-      else history.replaceState(null, '', url);
+      const sec = section ? `?sec=${encodeURIComponent(section)}` : '';
+      const url = `/${encodeURIComponent(repo)}/${enc}${sec}#${t}`;
+      if (push && location.pathname + location.search + location.hash !== url) {
+        history.pushState(null, '', url);
+      } else {
+        history.replaceState(null, '', url);
+      }
     },
     [repo],
   );
+
+  // 開檔後把預覽捲到指定章節 slug。markdown 由 react-markdown 同步渲染,但存檔序 / 版面可能
+  // 差一兩幀 → rAF 重試數次直到找到該標題。forPath:重試途中若預覽已換成別的檔(data-file
+  // 不符)則中止,避免捲錯檔。
+  const scrollSectionWhenReady = useCallback((slug: string, forPath: string) => {
+    let tries = 0;
+    const tick = () => {
+      const shown = document
+        .querySelector('[data-loc="explore:preview"]')
+        ?.getAttribute('data-file');
+      if (shown !== forPath) return; // 已導航到別的檔 → 放棄
+      if (scrollToHeadingSlug(slug) || tries++ > 12) return;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, []);
 
   // 載入資料夾視圖:該夾 children(grid)+ README.md(若有,case-insensitive)。
   const loadFolderView = useCallback(
@@ -496,7 +521,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   /** 導航到 repo 內路徑:先試當檔案開,失敗試當資料夾展開;都不行 → 錯誤。並同步網址列。
    *  push=true(連結 / grid 點擊)→ 留歷史可上一頁;false(deep-link 載入 / popstate)→ 取代。 */
   const navigateTo = useCallback(
-    async (rawPath: string, tab?: string, push = true) => {
+    async (rawPath: string, tab?: string, push = true, section?: string) => {
       const p = rawPath.replace(/^\/+|\/+$/g, '');
       if (!p) return;
       // 圖片:不抓文字,直接 <img> 預覽(圖片必為檔案)。
@@ -527,7 +552,8 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
         setDrawerOpen(false);
         await revealAncestors(p);
         setSelectedKeys([p]);
-        writeUrl(p, tab, push);
+        writeUrl(p, tab, push, section);
+        if (section && f.markdown) scrollSectionWhenReady(section, p);
         return;
       } catch {
         /* 不是檔案 → 試資料夾 */
@@ -546,19 +572,19 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
         setErr(`找不到連結目標:${p}`);
       }
     },
-    [repo, revealAncestors, writeUrl, loadFolderView],
+    [repo, revealAncestors, writeUrl, loadFolderView, scrollSectionWhenReady],
   );
 
   // 連結點擊導航(MarkdownEditor 派 porthole:navigate)。跨 repo → 暫存,待 repo 換好再開。
   useEffect(() => {
     const onNav = (e: Event) => {
-      const d = (e as CustomEvent).detail as { repo?: string; path?: string; tab?: string };
+      const d = (e as CustomEvent).detail as { repo?: string; path?: string; tab?: string; section?: string };
       if (!d?.path) return; // 純切 tab(無 path)交給 App 處理
       if (d.repo && d.repo !== repo) {
-        pendingNavRef.current = { path: d.path, tab: d.tab };
+        pendingNavRef.current = { path: d.path, tab: d.tab, section: d.section };
         return; // App 會 setRepo;換好後由 repo 變更 effect 接手開檔
       }
-      void navigateTo(d.path, d.tab);
+      void navigateTo(d.path, d.tab, true, d.section);
     };
     window.addEventListener('porthole:navigate', onNav);
     return () => window.removeEventListener('porthole:navigate', onNav);
@@ -571,7 +597,8 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       if (segs[0] !== repo) return; // 跨 repo 交給 App(切 repo 後由 repo effect 接手)
       const path = segs.slice(1).join('/');
       if (path) {
-        void navigateTo(path, location.hash.replace(/^#/, '') || undefined, false);
+        const sec = new URLSearchParams(location.search).get('sec') || undefined;
+        void navigateTo(path, location.hash.replace(/^#/, '') || undefined, false, sec);
       } else {
         // 回到 repo 根(無 path)→ 清空中央視圖
         setSel(null);
@@ -1313,7 +1340,7 @@ export function ExplorePreview() {
           <EnvView content={c.sel.content} />
         ) : c.sel.markdown ? (
           <div className="md-preview">
-            <Markdown>{c.sel.content}</Markdown>
+            <Markdown headingAnchors>{c.sel.content}</Markdown>
           </div>
         ) : (
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>

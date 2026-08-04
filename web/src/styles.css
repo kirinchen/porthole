@@ -43,6 +43,48 @@ body {
   max-width: 100%;
 }
 
+/* markdown 標題 GitHub 式定位錨點:hover 標題才顯示左側 `#`(LinkOutlined)。 */
+.md-heading {
+  position: relative;
+  scroll-margin-top: 12px; /* scrollIntoView 時上方留點空隙 */
+}
+.md-anchor {
+  position: absolute;
+  left: -1.15em;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 1em;
+  padding-top: 0.15em;
+  color: #8c8c8c;
+  opacity: 0;
+  transition: opacity 0.12s;
+  text-decoration: none;
+  font-size: 0.7em;
+  cursor: pointer;
+}
+.md-heading:hover .md-anchor,
+.md-anchor:focus {
+  opacity: 1;
+}
+.md-anchor:hover {
+  color: #1677ff;
+}
+/* 點錨點 / #slug 連結後,目標標題短暫高亮 */
+@keyframes md-heading-flash {
+  0%,
+  60% {
+    background: rgba(22, 119, 255, 0.14);
+  }
+  100% {
+    background: transparent;
+  }
+}
+.md-heading-flash {
+  animation: md-heading-flash 1.4s ease-out;
+  border-radius: 4px;
+}
+
 /* Explore 樹節點:讓 icon + 標題同列(標題 flex:1 自適應),避免 width:100% 溢出換行 */
 .ph-tree .ant-tree-node-content-wrapper {
   display: inline-flex;
