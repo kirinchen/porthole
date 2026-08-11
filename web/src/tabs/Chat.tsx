@@ -269,7 +269,7 @@ export default function Chat({ repo, isActive }: Props) {
               value={input}
               onChange={setInput}
               onSubmit={() => void send()}
-              placeholder={`對 ${repo} 的 agent 說…（@ 提及檔案,Enter 送出,Shift+Enter 換行)`}
+              placeholder={`對 ${repo} 的 agent 說…（@ 提及檔案,⌘/Ctrl+Enter 送出,Enter 換行)`}
               disabled={streaming}
             />
             <Button

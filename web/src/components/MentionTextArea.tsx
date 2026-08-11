@@ -5,7 +5,7 @@
  *  - 路徑導航:選資料夾 → 補 `/` 續查下一層;打 `../` 回上層。
  *    超出 repo root → 後端 path-guard 回 403,下拉顯示提示而非報錯(安全邊界靠 code)。
  *  - 選檔案 → 插入 `@<repo 相對路徑>`(claude -p 原生吃 @file,語意正確)。
- *  - 鍵盤:↑↓ 移動、Enter/Tab 選中、Esc 關;下拉關閉時 Enter 才送出。
+ *  - 鍵盤:↑↓ 移動、Enter/Tab 選中、Esc 關;下拉關閉時 Enter 換行、⌘/Ctrl+Enter 送出。
  *  - 列檔複用 GET /api/:repo/tree(單層),prefix 在前端過濾。
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -20,7 +20,7 @@ interface Props {
   repo: string;
   value: string;
   onChange: (value: string) => void;
-  /** 下拉關閉時按 Enter(無 Shift)。 */
+  /** 下拉關閉時按 ⌘/Ctrl+Enter。 */
   onSubmit: () => void;
   placeholder?: string;
   disabled?: boolean;
@@ -186,7 +186,8 @@ export default function MentionTextArea({
       closeMenu();
       return;
     }
-    if (e.key === 'Enter' && !e.shiftKey && !open) {
+    // 送出:⌘/Ctrl+Enter。純 Enter 換行(保留多行輸入,不誤送)。
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !open) {
       e.preventDefault();
       onSubmit();
     }

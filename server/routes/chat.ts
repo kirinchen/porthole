@@ -183,7 +183,8 @@ export default async function chatRoutes(app: FastifyInstance) {
 
       let assistant = '';
       // 帶上文:把先前對話 + 最新訊息一起給 claude -p(否則 stateless 沒記憶)。
-      const run = runClaude(buildContextPrompt(priorRaw, prompt), cwd);
+      // yolo:讓 chat agent 能實際用工具(否則多數功能被權限提示卡住);CWD 受 path-guard。
+      const run = runClaude(buildContextPrompt(priorRaw, prompt), cwd, { yolo: true });
 
       // client 中斷 → kill 子程序
       req.raw.on('close', () => run.abort());

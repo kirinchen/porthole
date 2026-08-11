@@ -15,16 +15,28 @@ export interface ClaudeRun {
   abort: () => void;
 }
 
+export interface RunOpts {
+  /**
+   * YOLO:加 --dangerously-skip-permissions,讓 agent 能無提示執行工具
+   * (讀寫檔、跑指令…)。安全邊界靠 CWD 的 path-guard(已鎖在 basePath 內),不靠 prompt。
+   */
+  yolo?: boolean;
+}
+
 /**
  * 跑 `claude -p <prompt>`,CWD = cwd。
  * prompt 走 argv(不經 shell),避免注入。
  */
-export function runClaude(prompt: string, cwd: string): ClaudeRun {
+export function runClaude(prompt: string, cwd: string, opts: RunOpts = {}): ClaudeRun {
   const chunkCbs: Array<(t: string) => void> = [];
   const errCbs: Array<(t: string) => void> = [];
   const endCbs: Array<(c: number | null) => void> = [];
 
-  const child = spawn('claude', ['-p', prompt], {
+  const args = ['-p'];
+  if (opts.yolo) args.push('--dangerously-skip-permissions');
+  args.push(prompt);
+
+  const child = spawn('claude', args, {
     cwd,
     env: process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
