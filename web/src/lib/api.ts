@@ -7,6 +7,8 @@ export interface TreeItem {
   name: string;
   path: string;
   type: 'dir' | 'file';
+  mtime?: number; // 修改時間(ms);僅帶 stat 時有
+  size?: number; // 檔案大小(bytes);dir 無,僅帶 stat 時有
 }
 
 export interface ClaudeSession {
@@ -32,8 +34,10 @@ async function jget<T>(url: string): Promise<T> {
 export const api = {
   repos: () => jget<{ base: string; repos: string[] }>('/api/repos'),
 
-  tree: (repo: string, path = '.') =>
-    jget<{ items: TreeItem[] }>(`/api/${repo}/tree?path=${encodeURIComponent(path)}`),
+  tree: (repo: string, path = '.', stat = false) =>
+    jget<{ items: TreeItem[] }>(
+      `/api/${repo}/tree?path=${encodeURIComponent(path)}${stat ? '&stat=1' : ''}`,
+    ),
 
   file: (repo: string, path: string) =>
     jget<{ content: string; markdown: boolean; ext: string }>(

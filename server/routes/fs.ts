@@ -31,6 +31,8 @@ interface Entry {
   name: string;
   path: string; // 相對 repo root
   type: 'dir' | 'file';
+  mtime?: number; // 修改時間(ms);僅 ?stat=1 時附上
+  size?: number; // 檔案大小(bytes);dir 省略,僅 ?stat=1 時附上
 }
 
 // 預設略過的雜訊目錄
@@ -46,22 +48,38 @@ export default async function fsRoutes(app: FastifyInstance) {
     return { base: guard.base, repos };
   });
 
-  app.get<{ Params: { repo: string }; Querystring: { path?: string } }>(
+  app.get<{ Params: { repo: string }; Querystring: { path?: string; stat?: string } }>(
     '/api/:repo/tree',
     async (req) => {
       const root = guard.resolveInRepo(req.params.repo, req.query.path ?? '.');
       const dirents = await fs.readdir(root, { withFileTypes: true });
       const repoRoot = guard.repoRoot(req.params.repo);
-      const items: Entry[] = dirents
-        .filter((d) => !SKIP.has(d.name))
-        .map((d) => ({
-          name: d.name,
-          path: path.relative(repoRoot, path.join(root, d.name)),
-          type: d.isDirectory() ? ('dir' as const) : ('file' as const),
-        }))
-        .sort((a, b) =>
-          a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1,
-        );
+      // stat opt-in:資料夾視圖 list 模式要 mtime/size;左側 tree 不帶,免每筆 stat 拖慢。
+      const withStat = req.query.stat === '1' || req.query.stat === 'true';
+      const kept = dirents.filter((d) => !SKIP.has(d.name));
+      const items: Entry[] = await Promise.all(
+        kept.map(async (d) => {
+          const isDir = d.isDirectory();
+          const e: Entry = {
+            name: d.name,
+            path: path.relative(repoRoot, path.join(root, d.name)),
+            type: isDir ? ('dir' as const) : ('file' as const),
+          };
+          if (withStat) {
+            try {
+              const st = await fs.stat(path.join(root, d.name));
+              e.mtime = st.mtimeMs;
+              if (!isDir) e.size = st.size;
+            } catch {
+              /* stat 失敗(broken symlink 等)→ 略過 meta,不擋清單 */
+            }
+          }
+          return e;
+        }),
+      );
+      items.sort((a, b) =>
+        a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1,
+      );
       return { items };
     },
   );

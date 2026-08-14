@@ -35,8 +35,11 @@ import {
   Popconfirm,
   TreeSelect,
   AutoComplete,
+  Table,
+  Segmented,
 } from 'antd';
 import type { TreeDataNode } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import {
   MenuOutlined,
   EditOutlined,
@@ -53,8 +56,10 @@ import {
   FolderOutlined,
   FileOutlined,
   DragOutlined,
+  AppstoreOutlined,
+  BarsOutlined,
 } from '@ant-design/icons';
-import { api } from '../lib/api';
+import { api, type TreeItem } from '../lib/api';
 import Markdown from '../components/Markdown';
 import EnvView from '../components/EnvView';
 import Outline from '../components/Outline';
@@ -96,6 +101,126 @@ function toNode(item: { name: string; path: string; type: 'dir' | 'file' }): Nod
 }
 
 const isMd = (p: string) => /\.(md|markdown)$/i.test(p);
+
+/** bytes → 人性化(資料夾傳 undefined → '—')。 */
+function fmtBytes(n: number | undefined): string {
+  if (n === undefined) return '—';
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
+}
+
+/** mtime(ms) → 'YYYY-MM-DD HH:mm'。 */
+function fmtMtime(ms: number | undefined): string {
+  if (ms === undefined) return '—';
+  const d = new Date(ms);
+  const p = (x: number) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** 貼上圖片自動檔名用的時間戳:YYYYMMDD-HHMMSS。 */
+function pasteStamp(): string {
+  const d = new Date();
+  const p = (x: number) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+/** 圖片 MIME → 副檔名。 */
+function imageExt(mime: string): string {
+  const m = mime.toLowerCase();
+  if (m === 'image/jpeg' || m === 'image/jpg') return 'jpg';
+  if (m === 'image/svg+xml') return 'svg';
+  const slash = m.indexOf('/');
+  const sub = slash === -1 ? '' : m.slice(slash + 1);
+  return /^[a-z0-9]+$/.test(sub) ? sub : 'png';
+}
+
+type FolderMode = 'grid' | 'list';
+const FOLDER_MODE_KEY = 'porthole:folderMode';
+function readFolderMode(): FolderMode {
+  try {
+    return localStorage.getItem(FOLDER_MODE_KEY) === 'list' ? 'list' : 'grid';
+  } catch {
+    return 'grid';
+  }
+}
+
+/** 檔名副檔名(小寫,無點);無副檔名回 ''。 */
+function extOf(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot <= 0 ? '' : name.slice(dot + 1).toLowerCase();
+}
+
+/** 資料夾視圖 list 模式:仿檔案總管,顯示 名稱/修改時間/大小/類型,欄頭可排序。 */
+function FolderTable({ entries, onOpen }: { entries: TreeItem[]; onOpen: (p: string) => void }) {
+  const columns: ColumnsType<TreeItem> = [
+    {
+      title: '名稱',
+      dataIndex: 'name',
+      ellipsis: true,
+      sorter: (a, b) => a.name.localeCompare(b.name),
+      render: (_v, r) => (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          {r.type === 'dir' ? (
+            <FolderOutlined style={{ color: '#1677ff', flexShrink: 0 }} />
+          ) : (
+            <FileOutlined style={{ color: '#888', flexShrink: 0 }} />
+          )}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {r.name}
+          </span>
+        </span>
+      ),
+    },
+    {
+      title: '修改時間',
+      dataIndex: 'mtime',
+      width: 160,
+      sorter: (a, b) => (a.mtime ?? 0) - (b.mtime ?? 0),
+      render: (v: number | undefined) => (
+        <span style={{ color: '#888', whiteSpace: 'nowrap' }}>{fmtMtime(v)}</span>
+      ),
+    },
+    {
+      title: '大小',
+      dataIndex: 'size',
+      width: 110,
+      align: 'right',
+      sorter: (a, b) => (a.size ?? -1) - (b.size ?? -1),
+      render: (v: number | undefined) => (
+        <span style={{ color: '#888', whiteSpace: 'nowrap' }}>{fmtBytes(v)}</span>
+      ),
+    },
+    {
+      title: '類型',
+      dataIndex: 'type',
+      width: 100,
+      sorter: (a, b) => (a.type === b.type ? extOf(a.name).localeCompare(extOf(b.name)) : a.type === 'dir' ? -1 : 1),
+      render: (_v, r) => (r.type === 'dir' ? '資料夾' : extOf(r.name).toUpperCase() || '檔案'),
+    },
+  ];
+  return (
+    <div data-loc="explore:folder:list">
+      <Table<TreeItem>
+        rowKey="path"
+        size="small"
+        pagination={false}
+        columns={columns}
+        dataSource={entries}
+        onRow={(r) => ({
+          onClick: () => onOpen(r.path),
+          style: { cursor: 'pointer' },
+        })}
+      />
+    </div>
+  );
+}
 
 /** repo 相對路徑的上層目錄('doc/note/a.md' → 'doc/note';'a.md' → '')。 */
 const parentDir = (p: string) => {
@@ -225,7 +350,15 @@ interface ExploreCtx {
   sel: Selected | null;
   selPath: string | null;
   selectedKeys: React.Key[]; // 樹反白(導航 / 點選同步)
-  folderView: { path: string; items: Node[]; readmePath: string | null; readme: string | null } | null;
+  folderView: {
+    path: string;
+    items: Node[];
+    entries: TreeItem[]; // 原始項目(含 mtime/size),供 list 模式與排序用
+    readmePath: string | null;
+    readme: string | null;
+  } | null;
+  folderMode: FolderMode; // 資料夾視圖:grid / list(記 localStorage)
+  setFolderMode: (m: FolderMode) => void;
   openPath: (path: string) => void; // 導航到 repo 內路徑(grid 點擊 / 程式導航)
   reloadSeq: number; // refresh 重載序號(編輯器 key / 圖片 cache-bust)
   saveFileContent: (content: string) => Promise<void>; // 直接寫檔(Excalidraw 存檔)
@@ -299,9 +432,24 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   const [folderView, setFolderView] = useState<{
     path: string;
     items: Node[];
+    entries: TreeItem[];
     readmePath: string | null;
     readme: string | null;
   } | null>(null);
+  const [folderMode, setFolderModeState] = useState<FolderMode>(readFolderMode);
+  const setFolderMode = useCallback((m: FolderMode) => {
+    setFolderModeState(m);
+    try {
+      localStorage.setItem(FOLDER_MODE_KEY, m);
+    } catch {
+      /* localStorage 不可用 → 僅記憶體 */
+    }
+  }, []);
+  // paste handler 走 document 監聽 → 用 ref 讀最新「選中的資料夾」,避免閉包舊值。
+  const folderViewRef = useRef(folderView);
+  useEffect(() => {
+    folderViewRef.current = folderView;
+  }, [folderView]);
   const pendingNavRef = useRef<{ path: string; tab?: string; section?: string } | null>(null); // 跨 repo 連結待開
   const didInitNav = useRef(false); // 初次載入是否已依 URL 開檔
   const [reloadSeq, setReloadSeq] = useState(0); // refresh 重載編輯器/圖片(換 key / cache-bust)
@@ -434,7 +582,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       setEditing(false);
       setSel(null); // 清檔案預覽 → 改顯示資料夾視圖
       try {
-        const r = await api.tree(repo, path);
+        const r = await api.tree(repo, path, true); // stat=1:list 模式要 mtime/size
         const items = r.items.map(toNode);
         if (path) setTree((prev) => updateChildren(prev, path, items)); // 同步進樹(展開可見)
         const readmeNode = items.find((n) => n.isLeaf && /^readme\.md$/i.test(String(n.title)));
@@ -449,7 +597,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
             /* README 載不到 → 只顯示 grid */
           }
         }
-        setFolderView({ path, items, readmePath, readme });
+        setFolderView({ path, items, entries: r.items, readmePath, readme });
         // README 連結相對解析基準 + ContentPick 行號:指向 README。
         setCurrentFile(readmePath && readme != null ? { path: readmePath, content: readme } : null);
       } catch (e) {
@@ -901,6 +1049,42 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     }
   };
 
+  // 選中資料夾時貼上剪貼簿圖片 → 自動命名 pasted-<時間戳> 存進該夾(base64,path-guard),再刷新視圖。
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const fv = folderViewRef.current;
+      if (!fv) return; // 僅「檢視某資料夾」時接手(選檔/編輯中不攔)
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const imgs = Array.from(items)
+        .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+        .map((it) => it.getAsFile())
+        .filter((f): f is File => f != null);
+      if (imgs.length === 0) return; // 非圖片(純文字等)→ 放行,不干擾
+      e.preventDefault();
+      const dir = fv.path;
+      void (async () => {
+        setErr(null);
+        setNote(null);
+        try {
+          const stamp = pasteStamp();
+          for (let i = 0; i < imgs.length; i++) {
+            const f = imgs[i];
+            const name = `pasted-${stamp}${imgs.length > 1 ? `-${i + 1}` : ''}.${imageExt(f.type)}`;
+            const b64 = await fileToBase64(f);
+            await api.writeFile(repo, joinPath(dir, name), b64, 'base64');
+          }
+          await loadFolderView(dir); // 刷新資料夾視圖 → 新圖出現在清單
+          setNote(`已貼上 ${imgs.length} 張圖到 ${dir || repo}(可用 rename 改名)`);
+        } catch (err) {
+          setErr((err as Error).message);
+        }
+      })();
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [repo, loadFolderView]);
+
   const value: ExploreCtx = {
     repo,
     isMobile,
@@ -914,6 +1098,8 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     selPath,
     selectedKeys,
     folderView,
+    folderMode,
+    setFolderMode,
     reloadSeq,
     openPath: (p: string) =>
       window.dispatchEvent(new CustomEvent('porthole:navigate', { detail: { repo, path: p } })),
@@ -1262,8 +1448,27 @@ export function ExplorePreview() {
           <Spin />
         ) : c.folderView ? (
           <div data-loc="explore:folder">
-            {c.folderView.items.length === 0 ? (
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}
+              data-loc="explore:folder:toolbar"
+            >
+              <Typography.Text type="secondary" style={{ flex: 1, minWidth: 0 }}>
+                {c.folderView.entries.length} 個項目 · 可貼上圖片存入此夾
+              </Typography.Text>
+              <Segmented
+                size="small"
+                value={c.folderMode}
+                onChange={(v) => c.setFolderMode(v as FolderMode)}
+                options={[
+                  { value: 'grid', icon: <AppstoreOutlined />, title: 'Grid' },
+                  { value: 'list', icon: <BarsOutlined />, title: 'List' },
+                ]}
+              />
+            </div>
+            {c.folderView.entries.length === 0 ? (
               <Empty description="空資料夾" />
+            ) : c.folderMode === 'list' ? (
+              <FolderTable entries={c.folderView.entries} onOpen={c.openPath} />
             ) : (
               <div
                 style={{

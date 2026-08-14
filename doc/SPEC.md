@@ -84,7 +84,9 @@ Chat / Session / CLI,**保活不卸載**(切走不斷 session 終端 WS)。中�
 ### 4.1 Explore
 - files tree(抄 InRay `features/repo`),根 = active repo root。
 - 點檔案 → 右側預覽(markdown 走 remark/rehype 渲染;圖片(png/jpg/gif/webp/svg/bmp/ico/avif)以 `<img>` 顯示,來源 `GET /api/:repo/raw`(path-guard、依副檔名給 content-type);**`.excalidraw`** 以 Excalidraw 白板編輯器開(自由繪圖,Google Drawing 式;存檔 serializeAsJSON 寫回 JSON,Ctrl+S / 儲存鈕;`@excalidraw/excalidraw` lazy 載入);**`.env`(含 `.env.*` / `*.env`)** 預覽美化成 KEY/VALUE 表(`EnvView`:註解分段、值可一鍵複製 / 整體遮罩,編輯仍走原始 textarea 不破壞格式);其他純文字)。
-- 點**資料夾** → 中央顯示該夾內容 grid(可點:檔案開檔、子夾鑽入)+ 其 `README.md`(若有,case-insensitive)渲染於下。
+- 點**資料夾** → 中央顯示該夾內容(可點:檔案開檔、子夾鑽入)+ 其 `README.md`(若有,case-insensitive)渲染於下。
+  - **grid / list 兩種檢視**(仿檔案總管,右上切換鈕,偏好記 `localStorage`)。**list** 模式以表格顯示 名稱 / 修改時間 / 大小 / 類型,**欄頭點擊排序**(名稱 localeCompare、時間 mtime、大小 bytes、類型副檔名);資料夾預設在前(後端 tree 已 dir-first 排序,list 未主動排時維持)。mtime/size 由 `GET /api/:repo/tree?stat=1` 附上(**opt-in**:僅資料夾視圖帶,左側 tree 不帶以免每筆 `stat` 拖慢)。
+  - **貼上圖片**:檢視某資料夾時,貼上(Ctrl/Cmd+V)剪貼簿圖片 → 自動命名 `pasted-<YYYYMMDD-HHMMSS>.<ext>` 存入該夾(base64 走 `PUT /api/:repo/file`,path-guard;多張補 `-1`/`-2`),存後刷新視圖;非圖片內容不攔(放行)。事後可用樹節點「改名」調整檔名。
 - **編輯**:預覽區「編輯」鈕 → markdown 走 CM6 Obsidian 式 live-preview、其他純 textarea → 儲存(`PUT /api/:repo/file`)。「儲存」鈕存檔並回預覽;**Ctrl/Cmd+S** 存檔但**不離開編輯**(派 `porthole:save-file`,讀 draftRef)。
 - **目錄(outline)**:markdown 預覽工具列「編輯」鈕旁的目錄鈕(`Outline`)→ click 展開 Popover 列出全部 ATX 標題(h1–h6,依層級縮排),點某項捲動到該標題。跳轉靠「第 N 個標題 ↔ preview 第 N 個 heading 元素」對位(`parseHeadings` 與渲染皆跳過 fenced code),免 heading id / rehype-slug、不怕重複標題。
 - **章節定位錨點(GitHub 式)**:預覽標題 hover 顯示左側 `#` 錨點(`lib/heading` + `Markdown headingAnchors`)。標題設 `id` / `data-heading-slug`(slug 規則與 `#section` 自動完成一致 —— 去 inline markdown、空白→`-`、保留中文;同名標題補 `-1`/`-2` 序號)。點錨點 → 平滑捲動 + 短暫高亮 + 網址列更新為可分享的 `?sec=<slug>` deep-link(保留 `#tab`)+ 複製完整 URL 到剪貼簿。**deep-link**:開啟帶 `?sec=` 的網址(初次載入 / 連結導航 / 上一頁)→ 渲染後自動捲到該章節(`scrollSectionWhenReady`,rAF 重試,換檔即中止)。**站內 `#slug` 連結**(含 `#` 自動完成插入的章節連結):同檔直接捲動不重載;`?sec=` 在 tab 切換間保留(`App` tab→hash effect 保留 `location.search`)。
