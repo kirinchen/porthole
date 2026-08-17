@@ -10,7 +10,7 @@
  *
  * 非 markdown 檔不走這裡(Explore 用純 textarea)。父層以 key=path 強制每檔重掛。
  */
-import { useEffect, useRef, createElement } from 'react';
+import { useEffect, useRef, useImperativeHandle, forwardRef, createElement } from 'react';
 import {
   EditorView,
   Decoration,
@@ -46,6 +46,11 @@ interface Props {
   onChange: (value: string) => void;
   /** 進編輯時初始捲到的行(0-based);用來延續 preview 的捲動位置。0/未給 = 頂端。 */
   initialLine?: number;
+}
+
+export interface MarkdownEditorHandle {
+  /** 目前編輯器頂端可見的行(0-based);退編輯時用來把位置帶回 preview。 */
+  topLine(): number;
 }
 
 /** 隱藏語法符號(零寬替換)。 */
@@ -575,12 +580,31 @@ const theme = EditorView.theme({
   '.cm-quote': { borderLeft: '3px solid #d9d9d9', paddingLeft: '12px', color: '#666' },
 });
 
-export default function MarkdownEditor({ value, onChange, initialLine }: Props) {
+const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function MarkdownEditor(
+  { value, onChange, initialLine },
+  ref,
+) {
   const host = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const initialLineRef = useRef(initialLine); // mount 時取一次(每次進編輯為新 mount)
   initialLineRef.current = initialLine;
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      topLine() {
+        const view = viewRef.current;
+        if (!view) return 0;
+        const rect = view.scrollDOM.getBoundingClientRect();
+        const pos = view.posAtCoords({ x: rect.left + 4, y: rect.top + 4 });
+        if (pos == null) return 0;
+        return view.state.doc.lineAt(pos).number - 1; // 1-based → 0-based
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     if (!host.current) return;
@@ -607,6 +631,7 @@ export default function MarkdownEditor({ value, onChange, initialLine }: Props) 
       }),
       parent: host.current,
     });
+    viewRef.current = view;
     // 延續 preview 捲動位置:捲到指定行並把游標放該行首(避免 focus 又跳回頂)。
     const ln0 = initialLineRef.current;
     if (ln0 && ln0 > 0) {
@@ -617,6 +642,7 @@ export default function MarkdownEditor({ value, onChange, initialLine }: Props) 
     view.focus();
     return () => {
       closeFlowMenu();
+      viewRef.current = null;
       view.destroy();
     };
     // value 只用於初始化;父層以 key=path 強制每檔重掛,故不放進依賴。
@@ -624,4 +650,6 @@ export default function MarkdownEditor({ value, onChange, initialLine }: Props) 
   }, []);
 
   return <div ref={host} style={{ height: '100%' }} data-loc="explore:edit:cm" />;
-}
+});
+
+export default MarkdownEditor;

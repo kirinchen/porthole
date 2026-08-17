@@ -63,6 +63,7 @@ import { api, type TreeItem } from '../lib/api';
 import Markdown from '../components/Markdown';
 import EnvView from '../components/EnvView';
 import Outline, { headingLineNumbers } from '../components/Outline';
+import type { MarkdownEditorHandle } from '../components/MarkdownEditor';
 import { scrollToHeadingSlug } from '../lib/heading';
 import { setCurrentFile } from '../lib/currentFile';
 
@@ -424,6 +425,7 @@ interface ExploreCtx {
   onSelect: (keys: React.Key[], info: { node: TreeDataNode }) => void;
   refresh: () => void;
   editInitialLine: number; // 進編輯時初始捲到的行(延續 preview 捲動位置)
+  editorRef: React.RefObject<MarkdownEditorHandle | null>; // 編輯器 handle(退編輯讀頂端行)
   startEdit: () => void;
   cancelEdit: () => void;
   save: () => void;
@@ -466,6 +468,8 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     }
   }, []);
   const editInitialLineRef = useRef(0); // 進編輯前算好的初始行(延續 preview 捲動位置)
+  const editorRef = useRef<MarkdownEditorHandle>(null); // 讀編輯器頂端行(退編輯帶回 preview)
+  const pendingExitHeadingRef = useRef<number | null>(null); // 退編輯後 preview 要捲到的 heading 序號(-1=頂)
   // paste handler 走 document 監聽 → 用 ref 讀最新「選中的資料夾」,避免閉包舊值。
   const folderViewRef = useRef(folderView);
   useEffect(() => {
@@ -796,7 +800,57 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setEditing(true);
   };
 
+  // 退編輯前:記住編輯器頂端所在的 heading 序號,回 preview 後捲到那(反向延續)。
+  const rememberExitHeading = () => {
+    if (!sel?.markdown || sel.isNew) {
+      pendingExitHeadingRef.current = null;
+      return;
+    }
+    const top0 = editorRef.current?.topLine() ?? 0;
+    const hls = headingLineNumbers(draftRef.current);
+    let n = -1;
+    for (let i = 0; i < hls.length; i++) {
+      if (hls[i] <= top0) n = i;
+      else break;
+    }
+    pendingExitHeadingRef.current = n; // -1 = 頂端在首個 heading 之前
+  };
+
+  // 換檔(sel.path 變)→ 作廢殘留的退出捲動意圖,避免捲錯檔。
+  useEffect(() => {
+    pendingExitHeadingRef.current = null;
+  }, [sel?.path]);
+
+  // 退出編輯(editing → false)且有記錄 → preview 渲染後捲到對應第 N 個 heading。
+  useEffect(() => {
+    if (editing) return;
+    const n = pendingExitHeadingRef.current;
+    if (n == null) return;
+    pendingExitHeadingRef.current = null;
+    const scroller = () => document.querySelector('[data-loc="explore:preview:scroll"]');
+    if (n < 0) {
+      scroller()?.scrollTo({ top: 0 });
+      return;
+    }
+    let tries = 0;
+    const tick = () => {
+      const sc = scroller();
+      const heads = sc?.querySelectorAll(
+        '.md-preview h1,.md-preview h2,.md-preview h3,.md-preview h4,.md-preview h5,.md-preview h6',
+      );
+      if (sc && heads && heads.length > n) {
+        const delta = heads[n].getBoundingClientRect().top - sc.getBoundingClientRect().top;
+        sc.scrollTop += delta;
+        return;
+      }
+      if (tries++ < 15) requestAnimationFrame(tick); // 等 preview 重新渲染出標題
+    };
+    requestAnimationFrame(tick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing]);
+
   const cancelEdit = () => {
+    rememberExitHeading();
     setEditing(false);
     setSaveErr(null);
     if (sel?.isNew) setSel(null); // 取消新檔 → 清掉
@@ -804,6 +858,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
 
   const save = async () => {
     if (!sel) return;
+    rememberExitHeading(); // 退編輯前(編輯器仍在)記住頂端位置
     setSaving(true);
     setSaveErr(null);
     try {
@@ -1175,6 +1230,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     refresh,
     saveFileContent: (content: string) => saveFileContent(content),
     editInitialLine: editInitialLineRef.current,
+    editorRef,
     startEdit,
     cancelEdit,
     save: () => void save(),
@@ -1461,6 +1517,7 @@ export function ExplorePreview() {
           c.sel.markdown ? (
             <Suspense fallback={<Spin />}>
               <MarkdownEditor
+                ref={c.editorRef}
                 key={`${c.sel.path}:${c.reloadSeq}`}
                 value={c.draft}
                 onChange={c.setDraft}
