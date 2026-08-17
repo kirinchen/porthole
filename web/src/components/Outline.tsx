@@ -50,6 +50,34 @@ export function parseHeadings(md: string): OutlineItem[] {
   return out;
 }
 
+/**
+ * 每個 ATX 標題的 0-based 行號,順序與 parseHeadings 一致(同樣跳過 fenced code)。
+ * 用於「preview 第 N 個 heading ↔ 原始碼第 N 個標題行」對位(進編輯保持捲動位置)。
+ */
+export function headingLineNumbers(md: string): number[] {
+  const out: number[] = [];
+  let inFence = false;
+  let fenceChar = '';
+  const lines = md.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const fm = /^\s*(```+|~~~+)/.exec(raw);
+    if (fm) {
+      const ch = fm[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = ch;
+      } else if (ch === fenceChar) {
+        inFence = false;
+      }
+      continue;
+    }
+    if (inFence) continue;
+    if (/^(#{1,6})\s+(.+?)\s*#*\s*$/.test(raw)) out.push(i);
+  }
+  return out;
+}
+
 export default function Outline({ text, onJump }: { text: string; onJump: (index: number) => void }) {
   const items = useMemo(() => parseHeadings(text), [text]);
   const [open, setOpen] = useState(false);

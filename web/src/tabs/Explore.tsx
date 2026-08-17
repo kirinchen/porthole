@@ -62,7 +62,7 @@ import {
 import { api, type TreeItem } from '../lib/api';
 import Markdown from '../components/Markdown';
 import EnvView from '../components/EnvView';
-import Outline from '../components/Outline';
+import Outline, { headingLineNumbers } from '../components/Outline';
 import { scrollToHeadingSlug } from '../lib/heading';
 import { setCurrentFile } from '../lib/currentFile';
 
@@ -149,6 +149,25 @@ function readFolderMode(): FolderMode {
   } catch {
     return 'grid';
   }
+}
+
+/**
+ * preview 捲動容器頂端「當前 section」的 heading 序號(第 N 個 heading,0-based)。
+ * 用來把 preview 捲動位置延續到編輯器。無 heading 或都在下方 → 0(頂端)。
+ */
+function previewTopHeadingIndex(): number {
+  const scroller = document.querySelector('[data-loc="explore:preview:scroll"]');
+  const preview = scroller?.querySelector('.md-preview');
+  if (!scroller || !preview) return 0;
+  const heads = preview.querySelectorAll('h1,h2,h3,h4,h5,h6');
+  if (heads.length === 0) return 0;
+  const top = scroller.getBoundingClientRect().top;
+  const tol = 4;
+  let idx = 0;
+  heads.forEach((h, i) => {
+    if (h.getBoundingClientRect().top <= top + tol) idx = i;
+  });
+  return idx;
 }
 
 /** 檔名副檔名(小寫,無點);無副檔名回 ''。 */
@@ -404,6 +423,7 @@ interface ExploreCtx {
   onLoadData: (node: TreeDataNode) => Promise<void>;
   onSelect: (keys: React.Key[], info: { node: TreeDataNode }) => void;
   refresh: () => void;
+  editInitialLine: number; // 進編輯時初始捲到的行(延續 preview 捲動位置)
   startEdit: () => void;
   cancelEdit: () => void;
   save: () => void;
@@ -445,6 +465,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       /* localStorage 不可用 → 僅記憶體 */
     }
   }, []);
+  const editInitialLineRef = useRef(0); // 進編輯前算好的初始行(延續 preview 捲動位置)
   // paste handler 走 document 監聽 → 用 ref 讀最新「選中的資料夾」,避免閉包舊值。
   const folderViewRef = useRef(folderView);
   useEffect(() => {
@@ -761,6 +782,14 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
 
   const startEdit = () => {
     if (!sel) return;
+    // 進編輯保持 preview 捲動位置:頂端可見 heading → 對應原始行(非 md 檔捲到頂)。
+    if (sel.markdown) {
+      const idx = previewTopHeadingIndex();
+      const lines = headingLineNumbers(sel.content);
+      editInitialLineRef.current = idx > 0 ? (lines[idx] ?? 0) : 0;
+    } else {
+      editInitialLineRef.current = 0;
+    }
     setDraftSync(sel.content);
     setSaveErr(null);
     setNote(null);
@@ -1145,6 +1174,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     onSelect,
     refresh,
     saveFileContent: (content: string) => saveFileContent(content),
+    editInitialLine: editInitialLineRef.current,
     startEdit,
     cancelEdit,
     save: () => void save(),
@@ -1425,11 +1455,17 @@ export function ExplorePreview() {
           overflow: (c.editing && c.sel?.markdown) || c.sel?.excalidraw ? 'hidden' : 'auto',
           padding: (c.editing && c.sel?.markdown) || c.sel?.excalidraw ? 0 : 16,
         }}
+        data-loc="explore:preview:scroll"
       >
         {c.editing && c.sel ? (
           c.sel.markdown ? (
             <Suspense fallback={<Spin />}>
-              <MarkdownEditor key={`${c.sel.path}:${c.reloadSeq}`} value={c.draft} onChange={c.setDraft} />
+              <MarkdownEditor
+                key={`${c.sel.path}:${c.reloadSeq}`}
+                value={c.draft}
+                onChange={c.setDraft}
+                initialLine={c.editInitialLine}
+              />
             </Suspense>
           ) : (
             <Input.TextArea

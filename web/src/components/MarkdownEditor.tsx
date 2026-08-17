@@ -44,6 +44,8 @@ const FENCE_COMPONENT = { mermaid: MermaidBlock, d2: D2Block, excalidraw: Excali
 interface Props {
   value: string;
   onChange: (value: string) => void;
+  /** 進編輯時初始捲到的行(0-based);用來延續 preview 的捲動位置。0/未給 = 頂端。 */
+  initialLine?: number;
 }
 
 /** 隱藏語法符號(零寬替換)。 */
@@ -573,10 +575,12 @@ const theme = EditorView.theme({
   '.cm-quote': { borderLeft: '3px solid #d9d9d9', paddingLeft: '12px', color: '#666' },
 });
 
-export default function MarkdownEditor({ value, onChange }: Props) {
+export default function MarkdownEditor({ value, onChange, initialLine }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const initialLineRef = useRef(initialLine); // mount 時取一次(每次進編輯為新 mount)
+  initialLineRef.current = initialLine;
 
   useEffect(() => {
     if (!host.current) return;
@@ -603,6 +607,13 @@ export default function MarkdownEditor({ value, onChange }: Props) {
       }),
       parent: host.current,
     });
+    // 延續 preview 捲動位置:捲到指定行並把游標放該行首(避免 focus 又跳回頂)。
+    const ln0 = initialLineRef.current;
+    if (ln0 && ln0 > 0) {
+      const ln = Math.min(ln0 + 1, view.state.doc.lines); // 0-based → 1-based,夾在文件範圍內
+      const pos = view.state.doc.line(ln).from;
+      view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: 'start' }) });
+    }
     view.focus();
     return () => {
       closeFlowMenu();
