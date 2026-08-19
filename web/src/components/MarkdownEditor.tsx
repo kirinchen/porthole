@@ -22,17 +22,10 @@ import {
 } from '@codemirror/view';
 import { EditorState, StateField, type Range } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
-import {
-  syntaxTree,
-  ensureSyntaxTree,
-  LanguageDescription,
-  LanguageSupport,
-  StreamLanguage,
-  syntaxHighlighting,
-  defaultHighlightStyle,
-} from '@codemirror/language';
+import { syntaxTree, ensureSyntaxTree, syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
 import { Table } from '@lezer/markdown';
+import { CODE_LANGUAGES } from '../lib/codeLanguages';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { mentionCompletionSource } from '../lib/mentionComplete';
@@ -43,53 +36,6 @@ import ExcalidrawBlock from './ExcalidrawBlock';
 import TableBlock from './TableBlock';
 import { getCurrentFile } from '../lib/currentFile';
 import { resolveLink } from '../lib/pathLink';
-
-/**
- * fenced code 語法高亮:精選常用語言,各自 lazy dynamic import(code-split,不撐主 bundle)。
- * 語言 tag(```後那段)比對 name / alias;不在清單的語言(如 cobol)維持純文字。
- */
-const CODE_LANGUAGES = [
-  LanguageDescription.of({
-    name: 'javascript',
-    alias: ['js', 'jsx', 'ts', 'tsx', 'typescript', 'node'],
-    load: () => import('@codemirror/lang-javascript').then((m) => m.javascript({ jsx: true, typescript: true })),
-  }),
-  LanguageDescription.of({
-    name: 'python',
-    alias: ['py'],
-    load: () => import('@codemirror/lang-python').then((m) => m.python()),
-  }),
-  LanguageDescription.of({ name: 'java', load: () => import('@codemirror/lang-java').then((m) => m.java()) }),
-  LanguageDescription.of({ name: 'json', load: () => import('@codemirror/lang-json').then((m) => m.json()) }),
-  LanguageDescription.of({
-    name: 'rust',
-    alias: ['rs'],
-    load: () => import('@codemirror/lang-rust').then((m) => m.rust()),
-  }),
-  LanguageDescription.of({ name: 'go', load: () => import('@codemirror/lang-go').then((m) => m.go()) }),
-  LanguageDescription.of({ name: 'sql', load: () => import('@codemirror/lang-sql').then((m) => m.sql()) }),
-  LanguageDescription.of({
-    name: 'yaml',
-    alias: ['yml'],
-    load: () => import('@codemirror/lang-yaml').then((m) => m.yaml()),
-  }),
-  LanguageDescription.of({ name: 'html', load: () => import('@codemirror/lang-html').then((m) => m.html()) }),
-  LanguageDescription.of({ name: 'css', load: () => import('@codemirror/lang-css').then((m) => m.css()) }),
-  LanguageDescription.of({ name: 'xml', load: () => import('@codemirror/lang-xml').then((m) => m.xml()) }),
-  LanguageDescription.of({
-    name: 'cpp',
-    alias: ['c', 'c++', 'h', 'hpp'],
-    load: () => import('@codemirror/lang-cpp').then((m) => m.cpp()),
-  }),
-  LanguageDescription.of({
-    name: 'shell',
-    alias: ['bash', 'sh', 'zsh', 'shell-session', 'console'],
-    load: () =>
-      import('@codemirror/legacy-modes/mode/shell').then(
-        (m) => new LanguageSupport(StreamLanguage.define(m.shell)),
-      ),
-  }),
-];
 
 /** 支援 GUI / 互動 widget 的 fenced 圖型語言。 */
 const FENCE_LANGS = ['mermaid', 'd2', 'excalidraw'] as const;

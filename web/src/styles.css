@@ -31,6 +31,69 @@ body {
   background: none;
   padding: 0;
 }
+/* fenced code 語法高亮(CodeBlock + highlightTree 產 tok-* class,色值仿 CM6 defaultHighlightStyle) */
+.md-preview .tok-keyword,
+.md-preview .tok-controlKeyword,
+.md-preview .tok-operatorKeyword,
+.md-preview .tok-definitionKeyword,
+.md-preview .tok-moduleKeyword,
+.md-preview .tok-modifier,
+.md-preview .tok-operator {
+  color: #708;
+}
+.md-preview .tok-atom,
+.md-preview .tok-bool,
+.md-preview .tok-null,
+.md-preview .tok-url,
+.md-preview .tok-labelName {
+  color: #219;
+}
+.md-preview .tok-literal,
+.md-preview .tok-number,
+.md-preview .tok-integer,
+.md-preview .tok-float,
+.md-preview .tok-inserted {
+  color: #164;
+}
+.md-preview .tok-string,
+.md-preview .tok-character,
+.md-preview .tok-attributeValue,
+.md-preview .tok-deleted {
+  color: #a11;
+}
+.md-preview .tok-regexp,
+.md-preview .tok-escape {
+  color: #e40;
+}
+.md-preview .tok-variableName {
+  color: #00f;
+}
+.md-preview .tok-typeName,
+.md-preview .tok-namespace {
+  color: #085;
+}
+.md-preview .tok-className,
+.md-preview .tok-tagName {
+  color: #167;
+}
+.md-preview .tok-macroName {
+  color: #256;
+}
+.md-preview .tok-propertyName,
+.md-preview .tok-attributeName {
+  color: #00c;
+}
+.md-preview .tok-comment,
+.md-preview .tok-lineComment,
+.md-preview .tok-blockComment {
+  color: #940;
+}
+.md-preview .tok-meta {
+  color: #404740;
+}
+.md-preview .tok-invalid {
+  color: #f00;
+}
 .md-preview table {
   border-collapse: collapse;
 }

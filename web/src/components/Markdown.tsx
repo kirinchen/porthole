@@ -13,6 +13,7 @@ import { LinkOutlined } from '@ant-design/icons';
 import MermaidBlock from './MermaidBlock';
 import D2Block from './D2Block';
 import ExcalidrawBlock from './ExcalidrawBlock';
+import CodeBlock from './CodeBlock';
 import { getCurrentFile } from '../lib/currentFile';
 import { resolveLink } from '../lib/pathLink';
 import { slugifyHeading, dedupeSlug, scrollToHeadingSlug } from '../lib/heading';
@@ -183,11 +184,9 @@ export default function Markdown({ children, onMermaidChange, headingAnchors }: 
           }
           const isBlock = /\blanguage-/.test(cls) || text.includes('\n');
           if (isBlock) {
-            return (
-              <pre>
-                <code className={cls}>{text}</code>
-              </pre>
-            );
+            // fenced code:與編輯器共用語言 parser 做語法高亮(清單外語言 → 純文字)。
+            const lang = (/\blanguage-([\w+#-]+)/.exec(cls)?.[1] ?? '').toLowerCase();
+            return <CodeBlock code={text} lang={lang} />;
           }
           return <code className={cls}>{c}</code>;
         },
