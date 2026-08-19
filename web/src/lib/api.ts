@@ -48,6 +48,10 @@ export const api = {
   rawUrl: (repo: string, path: string) =>
     `/api/${encodeURIComponent(repo)}/raw?path=${encodeURIComponent(path)}`,
 
+  /** 下載 URL(attachment,帶檔名);給 <a download> 觸發瀏覽器下載。 */
+  downloadUrl: (repo: string, path: string) =>
+    `/api/${encodeURIComponent(repo)}/raw?path=${encodeURIComponent(path)}&download=1`,
+
   writeFile: async (
     repo: string,
     path: string,

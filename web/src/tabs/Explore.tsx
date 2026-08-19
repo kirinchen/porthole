@@ -58,6 +58,7 @@ import {
   DragOutlined,
   AppstoreOutlined,
   BarsOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import { api, type TreeItem } from '../lib/api';
 import Markdown from '../components/Markdown';
@@ -169,6 +170,16 @@ function previewTopHeadingIndex(): number {
     if (h.getBoundingClientRect().top <= top + tol) idx = i;
   });
   return idx;
+}
+
+/** 觸發瀏覽器下載某檔(隱藏 a[download] 指向 attachment endpoint,path-guard 在後端)。 */
+function triggerDownload(repo: string, filePath: string) {
+  const a = document.createElement('a');
+  a.href = api.downloadUrl(repo, filePath);
+  a.download = filePath.split('/').pop() || 'download';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 /** 檔名副檔名(小寫,無點);無副檔名回 ''。 */
@@ -408,6 +419,7 @@ interface ExploreCtx {
   beginRename: (path: string) => void;
   commitRename: () => void;
   removePath: (path: string) => void;
+  downloadFile: (path: string) => void; // 下載某檔(預覽列 / 樹節點)
   // 移動到資料夾(沿用後端 rename 端點,純換目錄)
   moveOpen: boolean;
   setMoveOpen: (b: boolean) => void;
@@ -1213,6 +1225,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     beginRename,
     commitRename: () => void commitRename(),
     removePath: (p: string) => void removePath(p),
+    downloadFile: (p: string) => triggerDownload(repo, p),
     moveOpen,
     setMoveOpen,
     moveTarget,
@@ -1332,6 +1345,15 @@ function TreePanel() {
               <span className="ph-row" data-path={n.path} data-leaf={n.isLeaf ? '1' : '0'}>
                 <span className="ph-row-name">{n.title as React.ReactNode}</span>
                 <span className="ph-row-actions" onClick={(e) => e.stopPropagation()}>
+                  {n.isLeaf && (
+                    <DownloadOutlined
+                      title="下載"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        c.downloadFile(n.path);
+                      }}
+                    />
+                  )}
                   <EditOutlined
                     title="改名"
                     onClick={(e) => {
@@ -1466,6 +1488,18 @@ export function ExplorePreview() {
           </Typography.Text>
           {c.sel?.markdown && !c.editing && (
             <Outline text={c.sel.content} onJump={jumpHeading} />
+          )}
+          {c.sel && !c.sel.isNew && !c.editing && (
+            <Button
+              icon={<DownloadOutlined />}
+              onClick={() => {
+                if (c.sel) c.downloadFile(c.sel.path);
+              }}
+              title="下載此檔"
+              data-loc="explore:download"
+            >
+              下載
+            </Button>
           )}
           {c.sel &&
             !c.sel.image &&

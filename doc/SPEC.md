@@ -84,6 +84,7 @@ Chat / Session / CLI,**保活不卸載**(切走不斷 session 終端 WS)。中�
 ### 4.1 Explore
 - files tree(抄 InRay `features/repo`),根 = active repo root。
 - 點檔案 → 右側預覽(markdown 走 remark/rehype 渲染;圖片(png/jpg/gif/webp/svg/bmp/ico/avif)以 `<img>` 顯示,來源 `GET /api/:repo/raw`(path-guard、依副檔名給 content-type);**`.excalidraw`** 以 Excalidraw 白板編輯器開(自由繪圖,Google Drawing 式;存檔 serializeAsJSON 寫回 JSON,Ctrl+S / 儲存鈕;`@excalidraw/excalidraw` lazy 載入);**`.env`(含 `.env.*` / `*.env`)** 預覽美化成 KEY/VALUE 表(`EnvView`:註解分段、值可一鍵複製 / 整體遮罩,編輯仍走原始 textarea 不破壞格式);其他純文字)。
+- **下載檔案**:預覽工具列「下載」鈕(當前開啟檔,新檔/編輯中不顯示)+ 左側樹每個**檔案**節點的下載動作 → `GET /api/:repo/raw?download=1`(`Content-Disposition: attachment`,`filename*` RFC5987 編碼支援中文;沿用 raw 的 25MB 上限與 path-guard;不帶 `download` 時維持 inline 供圖片預覽)。前端以隱藏 `a[download]` 觸發,不經 SDK。
 - 點**資料夾** → 中央顯示該夾內容(可點:檔案開檔、子夾鑽入)+ 其 `README.md`(若有,case-insensitive)渲染於下。
   - **grid / list 兩種檢視**(仿檔案總管,右上切換鈕,偏好記 `localStorage`)。**list** 模式以表格顯示 名稱 / 修改時間 / 大小 / 類型,**欄頭點擊排序**(名稱 localeCompare、時間 mtime、大小 bytes、類型副檔名);資料夾預設在前(後端 tree 已 dir-first 排序,list 未主動排時維持)。mtime/size 由 `GET /api/:repo/tree?stat=1` 附上(**opt-in**:僅資料夾視圖帶,左側 tree 不帶以免每筆 `stat` 拖慢)。
   - **貼上圖片**:檢視某資料夾時,貼上(Ctrl/Cmd+V)剪貼簿圖片 → 自動命名 `pasted-<YYYYMMDD-HHMMSS>.<ext>` 存入該夾(base64 走 `PUT /api/:repo/file`,path-guard;多張補 `-1`/`-2`),存後刷新視圖;非圖片內容不攔(放行)。事後可用樹節點「改名」調整檔名。

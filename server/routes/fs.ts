@@ -103,7 +103,7 @@ export default async function fsRoutes(app: FastifyInstance) {
   );
 
   // 原始位元組串流(圖片預覽用 <img src>)。path-guard;依副檔名給 content-type。
-  app.get<{ Params: { repo: string }; Querystring: { path?: string } }>(
+  app.get<{ Params: { repo: string }; Querystring: { path?: string; download?: string } }>(
     '/api/:repo/raw',
     async (req, reply) => {
       const target = guard.resolveInRepo(req.params.repo, req.query.path ?? '');
@@ -113,6 +113,11 @@ export default async function fsRoutes(app: FastifyInstance) {
       const buf = await fs.readFile(target);
       reply.header('content-type', MIME[path.extname(target).toLowerCase()] ?? 'application/octet-stream');
       reply.header('cache-control', 'no-cache');
+      // ?download=1 → 強制下載(attachment)+ 帶檔名(RFC5987,支援中文);否則 inline(圖片預覽)。
+      if (req.query.download === '1' || req.query.download === 'true') {
+        const fname = path.basename(target);
+        reply.header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fname)}`);
+      }
       return reply.send(buf);
     },
   );
