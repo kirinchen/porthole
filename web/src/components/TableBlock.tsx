@@ -192,7 +192,7 @@ export default function TableBlock({ code, onApply }: Props) {
 
       {mode === 'grid' ? (
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ borderCollapse: 'collapse', fontSize: 13 }} data-loc="table:grid">
+          <table style={{ borderCollapse: 'collapse', fontSize: 13, width: '100%' }} data-loc="table:grid">
             <thead>
               <tr>
                 {model.headers.map((h, c) => (
@@ -267,7 +267,7 @@ export default function TableBlock({ code, onApply }: Props) {
                     />
                   </th>
                 ))}
-                <th style={{ border: 'none', padding: '0 4px', verticalAlign: 'middle' }}>
+                <th style={{ border: 'none', padding: '0 4px', verticalAlign: 'middle', width: 1, whiteSpace: 'nowrap' }}>
                   <Tooltip title="新增欄">
                     <Button
                       size="small"
@@ -305,7 +305,7 @@ export default function TableBlock({ code, onApply }: Props) {
                       />
                     </td>
                   ))}
-                  <td style={{ border: 'none', padding: '0 4px' }}>
+                  <td style={{ border: 'none', padding: '0 4px', width: 1, whiteSpace: 'nowrap' }}>
                     <Tooltip title="刪除此列">
                       <Button
                         size="small"
