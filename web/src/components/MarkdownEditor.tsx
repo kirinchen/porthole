@@ -552,7 +552,7 @@ function copySectionLink(slug: string): void {
 
 // hover 標題行 → 標題末端浮出「🔗 複製連結」鈕(純 DOM)。移到鈕上不消失(cancelHide),
 // 移開有短延遲避免閃動;捲動 / unmount 收起。
-let hoverTip: HTMLDivElement | null = null;
+let hoverTip: HTMLElement | null = null;
 let hoverTipLine = -1;
 let hoverHideTimer: number | null = null;
 function cancelHoverHide() {
@@ -573,35 +573,43 @@ function scheduleHeadingTipHide() {
   if (!hoverTip || hoverHideTimer != null) return;
   hoverHideTimer = window.setTimeout(closeHeadingTip, 240);
 }
-function showHeadingTip(view: EditorView, lineTo: number, lineNumber: number, slug: string) {
+// LinkOutlined(與預覽 `.md-anchor` 同一顆 icon;純 DOM 需自帶 SVG)。
+const LINK_ICON_SVG =
+  '<svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" aria-hidden="true" focusable="false">' +
+  '<path d="M574 665.4a8.03 8.03 0 00-11.3 0L446.5 781.6c-53.8 53.8-144.6 59.5-204 0-59.5-59.5-53.8-150.2 0-204l116.2-116.2c3.1-3.1 3.1-8.2 0-11.3l-39.8-39.8a8.03 8.03 0 00-11.3 0L191.4 526.5c-84.6 84.6-84.6 221.5 0 306s221.5 84.6 306 0l116.2-116.2c3.1-3.1 3.1-8.2 0-11.3L574 665.4zm258.6-474c-84.6-84.6-221.5-84.6-306 0L410.3 307.6a8.03 8.03 0 000 11.3l39.7 39.7c3.1 3.1 8.2 3.1 11.3 0l116.2-116.2c53.8-53.8 144.6-59.5 204 0 59.5 59.5 53.8 150.2 0 204L665.4 562.6a8.03 8.03 0 000 11.3l39.8 39.8c3.1 3.1 8.2 3.1 11.3 0l116.2-116.2c84.5-84.6 84.5-221.5-.1-306.1zM610.1 372.3a8.03 8.03 0 00-11.3 0L372.3 598.7a8.03 8.03 0 000 11.3l39.6 39.6c3.1 3.1 8.2 3.1 11.3 0l226.4-226.4c3.1-3.1 3.1-8.2 0-11.3l-39.5-39.6z"/></svg>';
+
+// 比照預覽:標題「左側」灰色 LinkOutlined 錨點,hover 顯示、點擊複製章節連結。
+function showHeadingTip(view: EditorView, lineFrom: number, lineNumber: number, slug: string) {
   cancelHoverHide();
   if (hoverTip && hoverTipLine === lineNumber) return; // 同一標題行 → 不重建
   closeHeadingTip();
-  const coords = view.coordsAtPos(lineTo);
+  const coords = view.coordsAtPos(lineFrom);
   if (!coords) return;
-  const tip = document.createElement('div');
+  const tip = document.createElement('a');
   tip.setAttribute('data-loc', 'explore:edit:headingtip');
+  tip.setAttribute('title', '複製章節連結');
+  tip.setAttribute('aria-label', '複製章節連結');
+  tip.innerHTML = LINK_ICON_SVG;
   tip.style.cssText =
-    'position:fixed;z-index:1500;background:#fff;border:1px solid #d9d9d9;border-radius:6px;' +
-    'box-shadow:0 2px 8px rgba(0,0,0,.15);padding:2px;';
-  const btn = document.createElement('button');
-  btn.textContent = '🔗 複製連結';
-  btn.style.cssText =
-    'border:none;background:transparent;cursor:pointer;font-size:12px;padding:3px 8px;' +
-    'border-radius:4px;white-space:nowrap;color:#1677ff;';
-  btn.onmouseenter = () => (btn.style.background = '#f0f7ff');
-  btn.onmouseleave = () => (btn.style.background = 'transparent');
-  btn.addEventListener('mousedown', (e) => {
+    'position:fixed;z-index:1500;display:inline-flex;align-items:center;cursor:pointer;' +
+    'color:#8c8c8c;font-size:14px;line-height:1;padding:2px;';
+  tip.onmouseenter = () => {
+    cancelHoverHide();
+    tip.style.color = '#1677ff';
+  };
+  tip.onmouseleave = () => {
+    tip.style.color = '#8c8c8c';
+    closeHeadingTip();
+  };
+  tip.addEventListener('mousedown', (e) => {
     e.preventDefault();
     copySectionLink(slug);
     closeHeadingTip();
   });
-  tip.appendChild(btn);
-  tip.addEventListener('mouseenter', cancelHoverHide);
-  tip.addEventListener('mouseleave', closeHeadingTip);
   document.body.appendChild(tip);
   const rect = tip.getBoundingClientRect();
-  const left = Math.max(8, Math.min(coords.left + 8, window.innerWidth - rect.width - 8));
+  // 置於標題文字左側(比照預覽 `.md-anchor` left:-1.15em);夾在視窗內。
+  const left = Math.max(2, coords.left - rect.width - 4);
   const top = Math.max(8, Math.min(coords.top + (coords.bottom - coords.top) / 2 - rect.height / 2, window.innerHeight - rect.height - 8));
   tip.style.left = `${left}px`;
   tip.style.top = `${top}px`;
@@ -627,7 +635,7 @@ const headingLinkHover = EditorView.domEventHandlers({
       scheduleHeadingTipHide();
       return false;
     }
-    showHeadingTip(view, line.to, line.number, slug);
+    showHeadingTip(view, line.from, line.number, slug);
     return false;
   },
   mouseleave() {
