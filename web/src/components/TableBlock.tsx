@@ -71,12 +71,20 @@ function delCol(m: TableModel, c: number): TableModel {
   };
 }
 
+const LINK_RE = /\[([^\]]*)\]\(([^)]*)\)/g;
+const cellHasLink = (v: string) => /\[[^\]]*\]\([^)]*\)/.test(v);
+
 /**
  * CellInput — 資料 cell 的編輯框。以自動長高的 <textarea> 取代單行 <input>:
  *  - 失焦:單行不換行(nowrap)截斷,維持表格緊湊。
  *  - focus:pre-wrap 換行 + 依內容自動長高,完整顯示整段內容(不必橫捲)。
  * 換行由 serializeTable 逸出成 `<br>`,不會破壞 pipe 表格。onChange 只改本地 model
  * (同 <input>,打字期間不 dispatch → widget 不 remount)。
+ *
+ * 連結縮起:失焦且含 `[t](u)` 時,於 textarea 上疊一層 overlay 顯示「連結已縮起」的文字
+ * (只顯示連結文字)。overlay 本體 `pointer-events:none` 讓非連結處點擊穿透回 textarea
+ * (精準定位游標、進編輯);只有 `<a>` 開 pointer-events 接 hover → 跳「🔗 編輯連結」tooltip
+ * (共用 MarkdownEditor 的 dialog;apply 替換該連結)、點連結則進編輯露出原始碼。
  */
 function CellInput({
   value,
@@ -119,38 +127,110 @@ function CellInput({
       apply: (md) => onChange(value.slice(0, start) + md + value.slice(end)),
     });
   };
+  const enterEdit = () => ref.current?.focus();
+
+  // 失焦 overlay:把值渲染成 text + 縮起的連結 <a>(連結文字);hover <a> → 編輯連結 tooltip。
+  const showOverlay = !focused && cellHasLink(value);
+  const overlayNodes: React.ReactNode[] = [];
+  if (showOverlay) {
+    LINK_RE.lastIndex = 0;
+    let last = 0;
+    let m: RegExpExecArray | null;
+    let key = 0;
+    while ((m = LINK_RE.exec(value))) {
+      if (m.index > last) overlayNodes.push(value.slice(last, m.index));
+      const start = m.index;
+      const end = LINK_RE.lastIndex;
+      const text = m[1];
+      const url = m[2];
+      overlayNodes.push(
+        <a
+          key={`l${key++}`}
+          className="ph-cell-link"
+          title={url}
+          onMouseEnter={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            showLinkTip(
+              rect.left,
+              rect.bottom + 4,
+              { text, url, apply: (md) => onChange(value.slice(0, start) + md + value.slice(end)) },
+              '🔗 編輯連結',
+            );
+          }}
+          // 點連結 → 進編輯露出原始碼(overlay 本體 pointer-events:none,故此處自行 focus)。
+          onMouseDown={(e) => {
+            e.preventDefault();
+            enterEdit();
+          }}
+        >
+          {text || url}
+        </a>,
+      );
+      last = end;
+    }
+    if (last < value.length) overlayNodes.push(value.slice(last));
+  }
+
   return (
-    <textarea
-      ref={ref}
-      rows={1}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      onContextMenu={onContextMenu}
-      onFocus={() => setFocused(true)}
-      onBlur={() => {
-        setFocused(false);
-        if (ref.current) ref.current.style.height = ''; // 收回單行高
-      }}
-      style={{
-        display: 'block',
-        width: '100%',
-        boxSizing: 'border-box',
-        border: 'none',
-        outline: 'none',
-        background: 'transparent',
-        padding: '4px 6px',
-        fontSize: 13,
-        fontFamily: 'inherit',
-        lineHeight: 1.5,
-        resize: 'none',
-        overflow: 'hidden',
-        textAlign: align,
-        whiteSpace: focused ? 'pre-wrap' : 'nowrap',
-      }}
-      data-loc="table:cell"
-      data-r={r}
-      data-c={c}
-    />
+    <div style={{ position: 'relative' }}>
+      <textarea
+        ref={ref}
+        rows={1}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onContextMenu={onContextMenu}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          if (ref.current) ref.current.style.height = ''; // 收回單行高
+        }}
+        style={{
+          display: 'block',
+          width: '100%',
+          boxSizing: 'border-box',
+          border: 'none',
+          outline: 'none',
+          background: 'transparent',
+          padding: '4px 6px',
+          fontSize: 13,
+          fontFamily: 'inherit',
+          lineHeight: 1.5,
+          resize: 'none',
+          overflow: 'hidden',
+          textAlign: align,
+          whiteSpace: focused ? 'pre-wrap' : 'nowrap',
+        }}
+        data-loc="table:cell"
+        data-r={r}
+        data-c={c}
+      />
+      {showOverlay && (
+        <div
+          className="ph-cell-overlay"
+          // pointer-events:none → 非連結處點擊穿透回 textarea(精準定位游標);只 <a> 例外。
+          style={{
+            position: 'absolute',
+            inset: 0,
+            pointerEvents: 'none',
+            padding: '4px 6px',
+            fontSize: 13,
+            fontFamily: 'inherit',
+            lineHeight: 1.5,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            textAlign: align,
+            background: '#fff',
+            boxSizing: 'border-box',
+          }}
+          data-loc="table:cell:overlay"
+          data-r={r}
+          data-c={c}
+        >
+          {overlayNodes}
+        </div>
+      )}
+    </div>
   );
 }
 

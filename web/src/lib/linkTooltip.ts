@@ -36,8 +36,8 @@ export function closeLinkTip(): void {
   document.removeEventListener('keydown', onDocKeyDown);
 }
 
-/** 於 (x,y) 附近浮出「🔗 連結」鈕;點擊 → 派 porthole:edit-link(帶 detail)。 */
-export function showLinkTip(x: number, y: number, detail: LinkEditDetail): void {
+/** 於 (x,y) 附近浮出連結鈕(label 預設「🔗 連結」,編輯既有連結可傳「🔗 編輯連結」);點擊 → 派 porthole:edit-link。 */
+export function showLinkTip(x: number, y: number, detail: LinkEditDetail, label = '🔗 連結'): void {
   closeLinkTip();
   const el = document.createElement('div');
   el.setAttribute('data-loc', 'explore:edit:linktip');
@@ -45,7 +45,7 @@ export function showLinkTip(x: number, y: number, detail: LinkEditDetail): void 
     'position:fixed;z-index:1500;background:#fff;border:1px solid #d9d9d9;border-radius:6px;' +
     'box-shadow:0 2px 8px rgba(0,0,0,.15);padding:2px;';
   const btn = document.createElement('button');
-  btn.textContent = '🔗 連結';
+  btn.textContent = label;
   btn.style.cssText =
     'border:none;background:transparent;cursor:pointer;font-size:13px;padding:4px 10px;' +
     'border-radius:4px;white-space:nowrap;color:#1677ff;';

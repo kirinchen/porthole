@@ -148,6 +148,17 @@ body {
   border-radius: 4px;
 }
 
+/* 表格 cell 失焦時「縮起的連結」:overlay 本體 pointer-events:none,唯 <a> 可 hover/點 */
+.ph-cell-link {
+  pointer-events: auto;
+  color: #1677ff;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ph-cell-link:hover {
+  color: #0958d9;
+}
+
 /* Explore 樹節點:讓 icon + 標題同列(標題 flex:1 自適應),避免 width:100% 溢出換行 */
 .ph-tree .ant-tree-node-content-wrapper {
   display: inline-flex;
