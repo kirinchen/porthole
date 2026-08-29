@@ -11,7 +11,7 @@
  *  - Ctrl/Cmd+S 的 keydown 在冒泡到 window(Explore 存檔 listener 讀 draftRef)之前先 flush,
  *    確保存到磁碟的是最新內容。
  */
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Segmented, Button, Input, Tooltip } from 'antd';
 import type { SegmentedValue } from 'antd/es/segmented';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
@@ -68,6 +68,72 @@ function delCol(m: TableModel, c: number): TableModel {
     aligns: m.aligns.filter((_, i) => i !== c),
     rows: m.rows.map((row) => row.filter((_, i) => i !== c)),
   };
+}
+
+/**
+ * CellInput — 資料 cell 的編輯框。以自動長高的 <textarea> 取代單行 <input>:
+ *  - 失焦:單行不換行(nowrap)截斷,維持表格緊湊。
+ *  - focus:pre-wrap 換行 + 依內容自動長高,完整顯示整段內容(不必橫捲)。
+ * 換行由 serializeTable 逸出成 `<br>`,不會破壞 pipe 表格。onChange 只改本地 model
+ * (同 <input>,打字期間不 dispatch → widget 不 remount)。
+ */
+function CellInput({
+  value,
+  align,
+  onChange,
+  r,
+  c,
+}: {
+  value: string;
+  align: 'left' | 'center' | 'right';
+  onChange: (v: string) => void;
+  r: number;
+  c: number;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const [focused, setFocused] = useState(false);
+  // focus 時依內容自動長高:先歸零再吃 scrollHeight。
+  const autosize = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  };
+  useEffect(() => {
+    if (focused) autosize();
+  }, [value, focused]);
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false);
+        if (ref.current) ref.current.style.height = ''; // 收回單行高
+      }}
+      style={{
+        display: 'block',
+        width: '100%',
+        boxSizing: 'border-box',
+        border: 'none',
+        outline: 'none',
+        background: 'transparent',
+        padding: '4px 6px',
+        fontSize: 13,
+        fontFamily: 'inherit',
+        lineHeight: 1.5,
+        resize: 'none',
+        overflow: 'hidden',
+        textAlign: align,
+        whiteSpace: focused ? 'pre-wrap' : 'nowrap',
+      }}
+      data-loc="table:cell"
+      data-r={r}
+      data-c={c}
+    />
+  );
 }
 
 export default function TableBlock({ code, onApply }: Props) {
@@ -285,23 +351,16 @@ export default function TableBlock({ code, onApply }: Props) {
               {model.rows.map((row, r) => (
                 <tr key={r}>
                   {row.map((cell, c) => (
-                    <td key={c} style={{ border: '1px solid #e8e8e8', padding: 0, minWidth: 90 }}>
-                      <input
+                    <td
+                      key={c}
+                      style={{ border: '1px solid #e8e8e8', padding: 0, minWidth: 90, verticalAlign: 'top' }}
+                    >
+                      <CellInput
                         value={cell}
-                        onChange={(e) => setModel(setCell(model, r, c, e.target.value))}
-                        style={{
-                          width: '100%',
-                          boxSizing: 'border-box',
-                          border: 'none',
-                          outline: 'none',
-                          background: 'transparent',
-                          padding: '4px 6px',
-                          fontSize: 13,
-                          textAlign: textAlignOf(model.aligns[c]),
-                        }}
-                        data-loc="table:cell"
-                        data-r={r}
-                        data-c={c}
+                        align={textAlignOf(model.aligns[c])}
+                        onChange={(v) => setModel(setCell(model, r, c, v))}
+                        r={r}
+                        c={c}
                       />
                     </td>
                   ))}
