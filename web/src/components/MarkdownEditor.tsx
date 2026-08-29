@@ -11,7 +11,7 @@
  * 非 markdown 檔不走這裡(Explore 用純 textarea)。父層以 key=path 強制每檔重掛。
  */
 import { useEffect, useRef, useState, useImperativeHandle, forwardRef, createElement } from 'react';
-import { Modal, Input } from 'antd';
+import { Modal, Input, message } from 'antd';
 import {
   EditorView,
   Decoration,
@@ -38,6 +38,7 @@ import TableBlock from './TableBlock';
 import { getCurrentFile } from '../lib/currentFile';
 import { resolveLink } from '../lib/pathLink';
 import { showLinkTip, closeLinkTip, type LinkEditDetail } from '../lib/linkTooltip';
+import { slugifyHeading, dedupeSlug } from '../lib/heading';
 
 /** 支援 GUI / 互動 widget 的 fenced 圖型語言。 */
 const FENCE_LANGS = ['mermaid', 'd2', 'excalidraw'] as const;
@@ -515,6 +516,130 @@ const linkContextMenu = EditorView.domEventHandlers({
   },
 });
 
+/**
+ * 取某行(1-based)所屬標題的章節 slug;非 ATX 標題行回 null。
+ * 走 syntaxTree 依文件序列舉 `ATXHeading[1-6]`(自動排除 fenced code 內的 `#`),
+ * 以與預覽相同的 seen Map 做 dedupe,確保 slug(含 `-1`/`-2` 後綴)與 `?sec=` deep-link 對齊。
+ */
+function sectionSlugForLine(state: EditorState, lineNumber: number): string | null {
+  const seen = new Map<string, number>();
+  let result: string | null = null;
+  syntaxTree(state).iterate({
+    enter: (node) => {
+      if (!/^ATXHeading[1-6]$/.test(node.name)) return;
+      const line = state.doc.lineAt(node.from);
+      const text = line.text.replace(/^#{1,6}\s+/, '').replace(/\s+#+\s*$/, ''); // 去前後 `#` 標記
+      const slug = dedupeSlug(slugifyHeading(text), seen);
+      if (line.number === lineNumber) result = slug;
+    },
+  });
+  return result;
+}
+
+/** 複製章節 deep-link(`?sec=<slug>`,保留 #tab);格式對齊預覽的 jumpAndCopySection。 */
+function copySectionLink(slug: string): void {
+  const rel = `${location.pathname}?sec=${encodeURIComponent(slug)}${location.hash || '#explore'}`;
+  const full = location.origin + rel;
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(full).then(
+      () => message.success('已複製章節連結'),
+      () => message.info('複製連結失敗'),
+    );
+  } else {
+    message.info('複製連結失敗');
+  }
+}
+
+// hover 標題行 → 標題末端浮出「🔗 複製連結」鈕(純 DOM)。移到鈕上不消失(cancelHide),
+// 移開有短延遲避免閃動;捲動 / unmount 收起。
+let hoverTip: HTMLDivElement | null = null;
+let hoverTipLine = -1;
+let hoverHideTimer: number | null = null;
+function cancelHoverHide() {
+  if (hoverHideTimer != null) {
+    clearTimeout(hoverHideTimer);
+    hoverHideTimer = null;
+  }
+}
+function closeHeadingTip() {
+  cancelHoverHide();
+  if (hoverTip) {
+    hoverTip.remove();
+    hoverTip = null;
+  }
+  hoverTipLine = -1;
+}
+function scheduleHeadingTipHide() {
+  if (!hoverTip || hoverHideTimer != null) return;
+  hoverHideTimer = window.setTimeout(closeHeadingTip, 240);
+}
+function showHeadingTip(view: EditorView, lineTo: number, lineNumber: number, slug: string) {
+  cancelHoverHide();
+  if (hoverTip && hoverTipLine === lineNumber) return; // 同一標題行 → 不重建
+  closeHeadingTip();
+  const coords = view.coordsAtPos(lineTo);
+  if (!coords) return;
+  const tip = document.createElement('div');
+  tip.setAttribute('data-loc', 'explore:edit:headingtip');
+  tip.style.cssText =
+    'position:fixed;z-index:1500;background:#fff;border:1px solid #d9d9d9;border-radius:6px;' +
+    'box-shadow:0 2px 8px rgba(0,0,0,.15);padding:2px;';
+  const btn = document.createElement('button');
+  btn.textContent = '🔗 複製連結';
+  btn.style.cssText =
+    'border:none;background:transparent;cursor:pointer;font-size:12px;padding:3px 8px;' +
+    'border-radius:4px;white-space:nowrap;color:#1677ff;';
+  btn.onmouseenter = () => (btn.style.background = '#f0f7ff');
+  btn.onmouseleave = () => (btn.style.background = 'transparent');
+  btn.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    copySectionLink(slug);
+    closeHeadingTip();
+  });
+  tip.appendChild(btn);
+  tip.addEventListener('mouseenter', cancelHoverHide);
+  tip.addEventListener('mouseleave', closeHeadingTip);
+  document.body.appendChild(tip);
+  const rect = tip.getBoundingClientRect();
+  const left = Math.max(8, Math.min(coords.left + 8, window.innerWidth - rect.width - 8));
+  const top = Math.max(8, Math.min(coords.top + (coords.bottom - coords.top) / 2 - rect.height / 2, window.innerHeight - rect.height - 8));
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+  hoverTip = tip;
+  hoverTipLine = lineNumber;
+}
+/** hover 到標題行 → 顯示複製連結鈕;非標題行 / 離開 / 捲動 → 收起(帶延遲)。 */
+const headingLinkHover = EditorView.domEventHandlers({
+  mousemove(e, view) {
+    const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+    if (pos == null) {
+      scheduleHeadingTipHide();
+      return false;
+    }
+    const line = view.state.doc.lineAt(pos);
+    // 便宜前篩:非 `#…` 行直接跳過(避免每次 mousemove 走 syntaxTree)。
+    if (!/^#{1,6}\s/.test(line.text)) {
+      scheduleHeadingTipHide();
+      return false;
+    }
+    const slug = sectionSlugForLine(view.state, line.number);
+    if (!slug) {
+      scheduleHeadingTipHide();
+      return false;
+    }
+    showHeadingTip(view, line.to, line.number, slug);
+    return false;
+  },
+  mouseleave() {
+    scheduleHeadingTipHide();
+    return false;
+  },
+  scroll() {
+    closeHeadingTip();
+    return false;
+  },
+});
+
 /** 依游標位置決定哪些行要露出原始碼,其餘套 live-preview 裝飾。 */
 function buildDecorations(view: EditorView): DecorationSet {
   const { doc } = view.state;
@@ -704,6 +829,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function Markdown
           linkContextMenu,
           flowContextMenu,
           linkNav,
+          headingLinkHover,
           livePreview,
           theme,
           EditorView.updateListener.of((u) => {
@@ -725,6 +851,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function Markdown
     return () => {
       closeFlowMenu();
       closeLinkTip();
+      closeHeadingTip();
       viewRef.current = null;
       view.destroy();
     };
