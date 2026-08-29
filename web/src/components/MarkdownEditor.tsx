@@ -10,7 +10,8 @@
  *
  * 非 markdown 檔不走這裡(Explore 用純 textarea)。父層以 key=path 強制每檔重掛。
  */
-import { useEffect, useRef, useImperativeHandle, forwardRef, createElement } from 'react';
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef, createElement } from 'react';
+import { Modal, Input } from 'antd';
 import {
   EditorView,
   Decoration,
@@ -475,6 +476,87 @@ const linkNav = EditorView.domEventHandlers({
   },
 });
 
+/** 連結編輯 dialog 需要的資訊(選區或既有 Link 節點的範圍 + 文字 + href)。 */
+export interface LinkEditDetail {
+  from: number;
+  to: number;
+  text: string;
+  url: string;
+}
+
+/** 取 pos 所在 Link 節點(整段 `[text](url)`);非連結回 null。供選字後編輯既有連結。 */
+function linkNodeAt(state: EditorState, pos: number): LinkEditDetail | null {
+  let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, 0);
+  while (node && node.name !== 'Link') node = node.parent;
+  if (!node) return null;
+  const urlNode = node.getChild('URL');
+  const url = urlNode ? state.doc.sliceString(urlNode.from, urlNode.to) : '';
+  const full = state.doc.sliceString(node.from, node.to);
+  const m = /^\[([^\]]*)\]/.exec(full);
+  return { from: node.from, to: node.to, text: m ? m[1] : full, url };
+}
+
+// 選字浮動工具:選取非空且同一行 → 選區上方浮出「🔗 連結」鈕(純 DOM,不引 Antd 進 CM6 樹)。
+let linkTip: HTMLDivElement | null = null;
+function closeLinkTip() {
+  if (linkTip) {
+    linkTip.remove();
+    linkTip = null;
+  }
+}
+function updateLinkTip(view: EditorView) {
+  const sel = view.state.selection.main;
+  // 無焦點 / 空選取 / 跨行 → 收起(連結文字不可跨行)。
+  if (!view.hasFocus || sel.empty || view.state.doc.lineAt(sel.from).number !== view.state.doc.lineAt(sel.to).number) {
+    closeLinkTip();
+    return;
+  }
+  const coords = view.coordsAtPos(sel.from);
+  if (!coords) {
+    closeLinkTip();
+    return;
+  }
+  if (!linkTip) {
+    const tip = document.createElement('div');
+    tip.setAttribute('data-loc', 'explore:edit:linktip');
+    tip.style.cssText =
+      'position:fixed;z-index:1500;background:#fff;border:1px solid #d9d9d9;border-radius:6px;' +
+      'box-shadow:0 2px 8px rgba(0,0,0,.15);padding:2px;';
+    const btn = document.createElement('button');
+    btn.textContent = '🔗 連結';
+    btn.style.cssText =
+      'border:none;background:transparent;cursor:pointer;font-size:13px;padding:4px 10px;' +
+      'border-radius:4px;white-space:nowrap;color:#1677ff;';
+    btn.onmouseenter = () => (btn.style.background = '#f0f7ff');
+    btn.onmouseleave = () => (btn.style.background = 'transparent');
+    // mousedown + preventDefault:不讓編輯器失焦(保住選區),再派事件開 dialog。
+    btn.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const s = view.state.selection.main;
+      const inLink = linkNodeAt(view.state, s.from);
+      const detail: LinkEditDetail = inLink ?? {
+        from: s.from,
+        to: s.to,
+        text: view.state.doc.sliceString(s.from, s.to),
+        url: '',
+      };
+      window.dispatchEvent(new CustomEvent('porthole:edit-link', { detail }));
+      closeLinkTip();
+    });
+    tip.appendChild(btn);
+    document.body.appendChild(tip);
+    linkTip = tip;
+  }
+  const h = linkTip.offsetHeight || 30;
+  let top = coords.top - h - 6;
+  if (top < 8) top = coords.bottom + 6; // 貼頂 → 改顯示於選區下方
+  const left = Math.max(8, Math.min(coords.left, window.innerWidth - linkTip.offsetWidth - 8));
+  linkTip.style.left = `${left}px`;
+  linkTip.style.top = `${top}px`;
+}
+/** 選取 / 游標 / 捲動 / 焦點變化 → 更新或收起浮動連結鈕。 */
+const linkToolbar = EditorView.updateListener.of((u) => updateLinkTip(u.view));
+
 /** 依游標位置決定哪些行要露出原始碼,其餘套 live-preview 裝飾。 */
 function buildDecorations(view: EditorView): DecorationSet {
   const { doc } = view.state;
@@ -601,6 +683,32 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function Markdown
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  // 連結編輯 dialog:由選字浮動鈕派 porthole:edit-link 事件開啟。
+  const [link, setLink] = useState({ open: false, from: 0, to: 0, text: '', url: '' });
+
+  useEffect(() => {
+    const onEdit = (e: Event) => {
+      const d = (e as CustomEvent<LinkEditDetail>).detail;
+      setLink({ open: true, from: d.from, to: d.to, text: d.text, url: d.url });
+    };
+    window.addEventListener('porthole:edit-link', onEdit);
+    return () => window.removeEventListener('porthole:edit-link', onEdit);
+  }, []);
+
+  // 套用:以 [文字](網址) 取代原範圍(既有連結則整段替換)。網址必填。
+  const applyLink = () => {
+    const view = viewRef.current;
+    const url = link.url.trim();
+    if (!view || !url) return;
+    const text = link.text.trim() || url;
+    const insert = `[${text}](${url})`;
+    view.dispatch({
+      changes: { from: link.from, to: link.to, insert },
+      selection: { anchor: link.from + insert.length },
+    });
+    setLink((l) => ({ ...l, open: false }));
+    view.focus();
+  };
   const initialLineRef = useRef(initialLine); // mount 時取一次(每次進編輯為新 mount)
   initialLineRef.current = initialLine;
 
@@ -637,6 +745,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function Markdown
           mermaidField,
           flowContextMenu,
           linkNav,
+          linkToolbar,
           livePreview,
           theme,
           EditorView.updateListener.of((u) => {
@@ -657,6 +766,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function Markdown
     view.focus();
     return () => {
       closeFlowMenu();
+      closeLinkTip();
       viewRef.current = null;
       view.destroy();
     };
@@ -664,7 +774,46 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function Markdown
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <div ref={host} style={{ height: '100%' }} data-loc="explore:edit:cm" />;
+  return (
+    <>
+      <div ref={host} style={{ height: '100%' }} data-loc="explore:edit:cm" />
+      <Modal
+        title="設定連結"
+        open={link.open}
+        onOk={applyLink}
+        onCancel={() => setLink((l) => ({ ...l, open: false }))}
+        okText="套用"
+        cancelText="取消"
+        okButtonProps={{ disabled: !link.url.trim() }}
+        width={440}
+        destroyOnClose
+        data-loc="explore:edit:linkdialog"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
+          <div>
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>連結文字</div>
+            <Input
+              value={link.text}
+              onChange={(e) => setLink((l) => ({ ...l, text: e.target.value }))}
+              placeholder="顯示文字(留空則用網址)"
+              data-loc="explore:edit:link:text"
+            />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>網址</div>
+            <Input
+              autoFocus
+              value={link.url}
+              onChange={(e) => setLink((l) => ({ ...l, url: e.target.value }))}
+              onPressEnter={applyLink}
+              placeholder="https://… 或站內相對路徑"
+              data-loc="explore:edit:link:url"
+            />
+          </div>
+        </div>
+      </Modal>
+    </>
+  );
 });
 
 export default MarkdownEditor;
