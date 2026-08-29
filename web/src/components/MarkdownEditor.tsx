@@ -37,6 +37,7 @@ import ExcalidrawBlock from './ExcalidrawBlock';
 import TableBlock from './TableBlock';
 import { getCurrentFile } from '../lib/currentFile';
 import { resolveLink } from '../lib/pathLink';
+import { showLinkTip, closeLinkTip, type LinkEditDetail } from '../lib/linkTooltip';
 
 /** 支援 GUI / 互動 widget 的 fenced 圖型語言。 */
 const FENCE_LANGS = ['mermaid', 'd2', 'excalidraw'] as const;
@@ -476,16 +477,8 @@ const linkNav = EditorView.domEventHandlers({
   },
 });
 
-/** 連結編輯 dialog 需要的資訊(選區或既有 Link 節點的範圍 + 文字 + href)。 */
-export interface LinkEditDetail {
-  from: number;
-  to: number;
-  text: string;
-  url: string;
-}
-
 /** 取 pos 所在 Link 節點(整段 `[text](url)`);非連結回 null。供選字後編輯既有連結。 */
-function linkNodeAt(state: EditorState, pos: number): LinkEditDetail | null {
+function linkNodeAt(state: EditorState, pos: number): { from: number; to: number; text: string; url: string } | null {
   let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, 0);
   while (node && node.name !== 'Link') node = node.parent;
   if (!node) return null;
@@ -496,66 +489,31 @@ function linkNodeAt(state: EditorState, pos: number): LinkEditDetail | null {
   return { from: node.from, to: node.to, text: m ? m[1] : full, url };
 }
 
-// 選字浮動工具:選取非空且同一行 → 選區上方浮出「🔗 連結」鈕(純 DOM,不引 Antd 進 CM6 樹)。
-let linkTip: HTMLDivElement | null = null;
-function closeLinkTip() {
-  if (linkTip) {
-    linkTip.remove();
-    linkTip = null;
-  }
-}
-function updateLinkTip(view: EditorView) {
-  const sel = view.state.selection.main;
-  // 無焦點 / 空選取 / 跨行 → 收起(連結文字不可跨行)。
-  if (!view.hasFocus || sel.empty || view.state.doc.lineAt(sel.from).number !== view.state.doc.lineAt(sel.to).number) {
-    closeLinkTip();
-    return;
-  }
-  const coords = view.coordsAtPos(sel.from);
-  if (!coords) {
-    closeLinkTip();
-    return;
-  }
-  if (!linkTip) {
-    const tip = document.createElement('div');
-    tip.setAttribute('data-loc', 'explore:edit:linktip');
-    tip.style.cssText =
-      'position:fixed;z-index:1500;background:#fff;border:1px solid #d9d9d9;border-radius:6px;' +
-      'box-shadow:0 2px 8px rgba(0,0,0,.15);padding:2px;';
-    const btn = document.createElement('button');
-    btn.textContent = '🔗 連結';
-    btn.style.cssText =
-      'border:none;background:transparent;cursor:pointer;font-size:13px;padding:4px 10px;' +
-      'border-radius:4px;white-space:nowrap;color:#1677ff;';
-    btn.onmouseenter = () => (btn.style.background = '#f0f7ff');
-    btn.onmouseleave = () => (btn.style.background = 'transparent');
-    // mousedown + preventDefault:不讓編輯器失焦(保住選區),再派事件開 dialog。
-    btn.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      const s = view.state.selection.main;
-      const inLink = linkNodeAt(view.state, s.from);
-      const detail: LinkEditDetail = inLink ?? {
-        from: s.from,
-        to: s.to,
-        text: view.state.doc.sliceString(s.from, s.to),
-        url: '',
-      };
-      window.dispatchEvent(new CustomEvent('porthole:edit-link', { detail }));
-      closeLinkTip();
+/**
+ * 選字後「右鍵」點選區 → 於滑鼠處浮出「🔗 連結」鈕(取代原生選單);點它開 dialog。
+ * detail.apply 走 view.dispatch 以 [text](url) 取代範圍;選區落在既有 Link 內則整段替換 + 預填 href。
+ */
+const linkContextMenu = EditorView.domEventHandlers({
+  contextmenu(event, view) {
+    const sel = view.state.selection.main;
+    if (sel.empty) return false; // 無選取 → 交給下方 flowContextMenu / 原生選單
+    event.preventDefault();
+    const inLink = linkNodeAt(view.state, sel.from);
+    const from = inLink ? inLink.from : sel.from;
+    const to = inLink ? inLink.to : sel.to;
+    const text = inLink ? inLink.text : view.state.doc.sliceString(sel.from, sel.to);
+    const url = inLink ? inLink.url : '';
+    showLinkTip(event.clientX, event.clientY, {
+      text,
+      url,
+      apply: (md) => {
+        view.dispatch({ changes: { from, to, insert: md }, selection: { anchor: from + md.length } });
+        view.focus();
+      },
     });
-    tip.appendChild(btn);
-    document.body.appendChild(tip);
-    linkTip = tip;
-  }
-  const h = linkTip.offsetHeight || 30;
-  let top = coords.top - h - 6;
-  if (top < 8) top = coords.bottom + 6; // 貼頂 → 改顯示於選區下方
-  const left = Math.max(8, Math.min(coords.left, window.innerWidth - linkTip.offsetWidth - 8));
-  linkTip.style.left = `${left}px`;
-  linkTip.style.top = `${top}px`;
-}
-/** 選取 / 游標 / 捲動 / 焦點變化 → 更新或收起浮動連結鈕。 */
-const linkToolbar = EditorView.updateListener.of((u) => updateLinkTip(u.view));
+    return true;
+  },
+});
 
 /** 依游標位置決定哪些行要露出原始碼,其餘套 live-preview 裝飾。 */
 function buildDecorations(view: EditorView): DecorationSet {
@@ -683,31 +641,31 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function Markdown
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
-  // 連結編輯 dialog:由選字浮動鈕派 porthole:edit-link 事件開啟。
-  const [link, setLink] = useState({ open: false, from: 0, to: 0, text: '', url: '' });
+  // 連結編輯 dialog:由選字右鍵浮動鈕派 porthole:edit-link 事件開啟。
+  // detail.apply 決定寫回來源(CM6 dispatch / table cell 字串);dialog 只負責 UI。
+  const [link, setLink] = useState<{ open: boolean; text: string; url: string; apply: (md: string) => void }>({
+    open: false,
+    text: '',
+    url: '',
+    apply: () => {},
+  });
 
   useEffect(() => {
     const onEdit = (e: Event) => {
       const d = (e as CustomEvent<LinkEditDetail>).detail;
-      setLink({ open: true, from: d.from, to: d.to, text: d.text, url: d.url });
+      setLink({ open: true, text: d.text, url: d.url, apply: d.apply });
     };
     window.addEventListener('porthole:edit-link', onEdit);
     return () => window.removeEventListener('porthole:edit-link', onEdit);
   }, []);
 
-  // 套用:以 [文字](網址) 取代原範圍(既有連結則整段替換)。網址必填。
+  // 套用:以 [文字](網址) 交給來源 apply 回寫。網址必填。
   const applyLink = () => {
-    const view = viewRef.current;
     const url = link.url.trim();
-    if (!view || !url) return;
+    if (!url) return;
     const text = link.text.trim() || url;
-    const insert = `[${text}](${url})`;
-    view.dispatch({
-      changes: { from: link.from, to: link.to, insert },
-      selection: { anchor: link.from + insert.length },
-    });
+    link.apply(`[${text}](${url})`);
     setLink((l) => ({ ...l, open: false }));
-    view.focus();
   };
   const initialLineRef = useRef(initialLine); // mount 時取一次(每次進編輯為新 mount)
   initialLineRef.current = initialLine;
@@ -743,9 +701,9 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function Markdown
           autocompletion({ override: [mentionCompletionSource], icons: false }),
           EditorView.lineWrapping,
           mermaidField,
+          linkContextMenu,
           flowContextMenu,
           linkNav,
-          linkToolbar,
           livePreview,
           theme,
           EditorView.updateListener.of((u) => {

@@ -23,6 +23,7 @@ import {
   tableModelEqual,
   emptyTable,
 } from '../lib/mdTable';
+import { showLinkTip, parseInlineLink } from '../lib/linkTooltip';
 
 interface Props {
   code: string;
@@ -102,12 +103,29 @@ function CellInput({
   useEffect(() => {
     if (focused) autosize();
   }, [value, focused]);
+  // 選字後右鍵 → 浮出「🔗 連結」鈕(取代原生選單);套用把選取子字串換成 [text](url)。
+  // dialog UI 由祖先 MarkdownEditor 的 Modal 接手(table widget 是其子樹)。
+  const onContextMenu = (e: React.MouseEvent<HTMLTextAreaElement>) => {
+    const el = e.currentTarget;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    if (start === end) return; // 無選取 → 原生選單
+    e.preventDefault();
+    const selected = value.slice(start, end);
+    const inline = parseInlineLink(selected); // 選取本身已是 [t](u) → 預填
+    showLinkTip(e.clientX, e.clientY, {
+      text: inline ? inline.text : selected,
+      url: inline ? inline.url : '',
+      apply: (md) => onChange(value.slice(0, start) + md + value.slice(end)),
+    });
+  };
   return (
     <textarea
       ref={ref}
       rows={1}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onContextMenu={onContextMenu}
       onFocus={() => setFocused(true)}
       onBlur={() => {
         setFocused(false);
