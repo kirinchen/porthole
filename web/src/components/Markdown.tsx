@@ -17,6 +17,7 @@ import CodeBlock from './CodeBlock';
 import { getCurrentFile } from '../lib/currentFile';
 import { resolveLink } from '../lib/pathLink';
 import { slugifyHeading, dedupeSlug, scrollToHeadingSlug } from '../lib/heading';
+import { copyText } from '../lib/clipboard';
 
 interface Props {
   children: string;
@@ -41,14 +42,9 @@ function jumpAndCopySection(slug: string): void {
   history.replaceState(null, '', rel);
   scrollToHeadingSlug(slug);
   const full = location.origin + rel;
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(full).then(
-      () => message.success('已複製章節連結'),
-      () => message.info('已跳至章節(複製連結失敗)'),
-    );
-  } else {
-    message.success('已跳至章節');
-  }
+  copyText(full).then((ok) =>
+    ok ? message.success('已複製章節連結') : message.info('已跳至章節(複製連結失敗)'),
+  );
 }
 
 /** 章節錨點的完整可分享 href(?sec=slug 保留 #tab)——供中鍵 / 複製網址 / hover 用。 */

@@ -39,6 +39,7 @@ import { getCurrentFile } from '../lib/currentFile';
 import { resolveLink } from '../lib/pathLink';
 import { showLinkTip, closeLinkTip, type LinkEditDetail } from '../lib/linkTooltip';
 import { slugifyHeading, dedupeSlug } from '../lib/heading';
+import { copyText } from '../lib/clipboard';
 
 /** 支援 GUI / 互動 widget 的 fenced 圖型語言。 */
 const FENCE_LANGS = ['mermaid', 'd2', 'excalidraw'] as const;
@@ -540,14 +541,7 @@ function sectionSlugForLine(state: EditorState, lineNumber: number): string | nu
 function copySectionLink(slug: string): void {
   const rel = `${location.pathname}?sec=${encodeURIComponent(slug)}${location.hash || '#explore'}`;
   const full = location.origin + rel;
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(full).then(
-      () => message.success('已複製章節連結'),
-      () => message.info('複製連結失敗'),
-    );
-  } else {
-    message.info('複製連結失敗');
-  }
+  copyText(full).then((ok) => (ok ? message.success('已複製章節連結') : message.info('複製連結失敗')));
 }
 
 // hover 標題行 → 標題末端浮出「🔗 複製連結」鈕(純 DOM)。移到鈕上不消失(cancelHide),
