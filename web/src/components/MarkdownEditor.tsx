@@ -145,6 +145,13 @@ class TableWidget extends WidgetType {
     // flow-root:同 FenceWidget,建 BFC 讓子元件 margin 計入量測高度,避免下方行點擊偏移。
     dom.style.display = 'flow-root';
     dom.setAttribute('data-loc', 'explore:edit:table');
+    // 突破 .cm-content 的 860px 正文閱讀寬:表格編輯器撐滿編輯窗格可視寬,避免欄位太擠。
+    // 內容欄靠左(無 gutter),故 widget 左緣≈scroller 左緣;設寬為 scroller 可視寬即滿版。
+    const fitWidth = () => {
+      const w = view.scrollDOM.clientWidth;
+      if (w > 0) dom.style.width = `${w - 4}px`;
+    };
+    fitWidth();
     const root = createRoot(dom);
     root.render(
       createElement(TableBlock, {
@@ -152,8 +159,13 @@ class TableWidget extends WidgetType {
         onApply: (nc: string) => applyTableBlock(view, this.index, nc),
       }),
     );
-    const ro = new ResizeObserver(() => view.requestMeasure());
+    // 觀察 dom(高度變化)+ scroller(窗格寬變化,如拉動分割線)→ 重量測 / 重算滿版寬。
+    const ro = new ResizeObserver(() => {
+      fitWidth();
+      view.requestMeasure();
+    });
     ro.observe(dom);
+    ro.observe(view.scrollDOM);
     (dom as unknown as { _root: Root; _ro: ResizeObserver })._root = root;
     (dom as unknown as { _root: Root; _ro: ResizeObserver })._ro = ro;
     return dom;
