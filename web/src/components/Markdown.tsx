@@ -18,6 +18,7 @@ import { getCurrentFile } from '../lib/currentFile';
 import { resolveLink } from '../lib/pathLink';
 import { slugifyHeading, dedupeSlug, scrollToHeadingSlug } from '../lib/heading';
 import { copyText } from '../lib/clipboard';
+import { api } from '../lib/api';
 
 interface Props {
   children: string;
@@ -139,6 +140,19 @@ function MdLink({ href, children }: { href?: string; children?: React.ReactNode 
   );
 }
 
+/**
+ * 預覽圖片:相對路徑(如貼上的 `pasted-….png`)以「目前開啟檔」為基準解析成
+ * `GET /api/:repo/raw`(path-guard),否則相對於瀏覽器 URL 會 404。外部 / data: 原樣。
+ */
+function MdImg({ src, alt }: { src?: string; alt?: string }) {
+  const repo = decodeURIComponent(location.pathname.split('/').filter(Boolean)[0] ?? '');
+  const cur = getCurrentFile();
+  const target = src ? resolveLink(src, repo, cur?.path ?? '') : null;
+  const realSrc =
+    target?.kind === 'internal' ? api.rawUrl(target.repo, target.path) : target?.kind === 'external' ? target.url : src;
+  return <img src={realSrc} alt={alt ?? ''} />;
+}
+
 export default function Markdown({ children, onMermaidChange, headingAnchors }: Props) {
   return (
     <ReactMarkdown
@@ -146,6 +160,8 @@ export default function Markdown({ children, onMermaidChange, headingAnchors }: 
       components={{
         // 連結:相對路徑以目前檔為基準解析 → SPA 導航(見 MdLink)
         a: ({ href, children: c }) => <MdLink href={href}>{c}</MdLink>,
+        // 圖片:相對路徑以目前檔為基準解析 → /api/:repo/raw(見 MdImg)
+        img: ({ src, alt }) => <MdImg src={typeof src === 'string' ? src : undefined} alt={alt} />,
         // 標題:給預覽時加 GitHub 式定位錨點(id + hover `#`)。每次渲染重建 → seen Map 依
         // 文件序去重(同名標題補序號);穩定 Map 會在 re-render 累加而算錯,故不快取。
         ...(headingAnchors ? headingComponents() : {}),

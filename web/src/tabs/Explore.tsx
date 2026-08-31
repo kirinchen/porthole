@@ -455,6 +455,7 @@ interface ExploreCtx {
   refresh: () => void;
   editInitialLine: number; // 進編輯時初始捲到的行(延續 preview 捲動位置)
   editorRef: React.RefObject<MarkdownEditorHandle | null>; // 編輯器 handle(退編輯讀頂端行)
+  pasteEditorImage: (file: File) => Promise<string | null>; // 編輯器貼圖 → 存檔回傳相對名
   startEdit: () => void;
   cancelEdit: () => void;
   save: () => void;
@@ -1221,6 +1222,22 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     }
   };
 
+  // 編輯 markdown 時貼上剪貼簿圖片 → 存到「目前檔所在目錄」(pasted-<時間戳>.<ext>,base64,
+  // path-guard),回傳相對檔名供編輯器插入 ![](name)(同目錄故相對路徑 = 檔名)。
+  const pasteEditorImage = useCallback(
+    async (file: File): Promise<string | null> => {
+      const cur = selPath;
+      if (!cur) return null;
+      const dir = parentDir(cur);
+      const name = `pasted-${pasteStamp()}.${imageExt(file.type)}`;
+      const b64 = await fileToBase64(file);
+      await api.writeFile(repo, joinPath(dir, name), b64, 'base64');
+      reloadTree(); // 讓新圖出現在樹 / 之後預覽可讀
+      return name;
+    },
+    [repo, selPath],
+  );
+
   // 選中資料夾時貼上剪貼簿圖片 → 自動命名 pasted-<時間戳> 存進該夾(base64,path-guard),再刷新視圖。
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -1335,6 +1352,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     saveFileContent: (content: string) => saveFileContent(content),
     editInitialLine: editInitialLineRef.current,
     editorRef,
+    pasteEditorImage: (file: File) => pasteEditorImage(file),
     startEdit,
     cancelEdit,
     save: () => void save(),
@@ -1774,6 +1792,7 @@ export function ExplorePreview() {
                 value={c.draft}
                 onChange={c.setDraft}
                 initialLine={c.editInitialLine}
+                onImagePaste={c.pasteEditorImage}
               />
             </Suspense>
           ) : (

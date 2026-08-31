@@ -51,6 +51,8 @@ interface Props {
   onChange: (value: string) => void;
   /** 進編輯時初始捲到的行(0-based);用來延續 preview 的捲動位置。0/未給 = 頂端。 */
   initialLine?: number;
+  /** 貼上剪貼簿圖片:存檔後回傳要插入 `![](path)` 的相對路徑;回 null 則不插入。 */
+  onImagePaste?: (file: File) => Promise<string | null>;
 }
 
 export interface MarkdownEditorHandle {
@@ -761,13 +763,15 @@ const theme = EditorView.theme({
 });
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function MarkdownEditor(
-  { value, onChange, initialLine },
+  { value, onChange, initialLine, onImagePaste },
   ref,
 ) {
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onImagePasteRef = useRef(onImagePaste); // 供一次性建立的 paste extension 取最新 callback
+  onImagePasteRef.current = onImagePaste;
   // 連結編輯 dialog:由選字右鍵浮動鈕派 porthole:edit-link 事件開啟。
   // detail.apply 決定寫回來源(CM6 dispatch / table cell 字串);dialog 只負責 UI。
   const [link, setLink] = useState<{ open: boolean; text: string; url: string; apply: (md: string) => void }>({
@@ -832,6 +836,35 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function Markdown
           flowContextMenu,
           linkNav,
           headingLinkHover,
+          // 貼上剪貼簿圖片 → 交 onImagePaste 存檔,回傳路徑後於游標插入 ![](path)。
+          EditorView.domEventHandlers({
+            paste(event, view) {
+              const cb = onImagePasteRef.current;
+              if (!cb) return false;
+              const items = event.clipboardData?.items;
+              if (!items) return false;
+              const imgs = Array.from(items)
+                .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+                .map((it) => it.getAsFile())
+                .filter((f): f is File => f != null);
+              if (imgs.length === 0) return false; // 非圖片 → 放行(正常貼文字)
+              event.preventDefault();
+              void (async () => {
+                for (const f of imgs) {
+                  const p = await cb(f);
+                  if (!p) continue;
+                  const md = `![](${p})`;
+                  const sel = view.state.selection.main;
+                  view.dispatch({
+                    changes: { from: sel.from, to: sel.to, insert: md },
+                    selection: { anchor: sel.from + md.length },
+                  });
+                }
+                view.focus();
+              })();
+              return true;
+            },
+          }),
           livePreview,
           theme,
           EditorView.updateListener.of((u) => {
