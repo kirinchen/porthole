@@ -37,6 +37,7 @@ import ExcalidrawBlock from './ExcalidrawBlock';
 import TableBlock from './TableBlock';
 import { getCurrentFile } from '../lib/currentFile';
 import { resolveLink } from '../lib/pathLink';
+import { api } from '../lib/api';
 import { showLinkTip, closeLinkTip, type LinkEditDetail } from '../lib/linkTooltip';
 import { slugifyHeading, dedupeSlug } from '../lib/heading';
 import { copyText } from '../lib/clipboard';
@@ -644,6 +645,46 @@ const headingLinkHover = EditorView.domEventHandlers({
   },
 });
 
+/** 圖片 src 解析:相對路徑以「目前開啟檔」為基準 → /api/:repo/raw;外部 / data: 原樣。 */
+function resolveRawSrc(src: string): string {
+  const repo = decodeURIComponent(location.pathname.split('/').filter(Boolean)[0] ?? '');
+  const cur = getCurrentFile();
+  const target = src ? resolveLink(src, repo, cur?.path ?? '') : null;
+  if (target?.kind === 'internal') return api.rawUrl(target.repo, target.path);
+  if (target?.kind === 'external') return target.url;
+  return src;
+}
+
+/** live-preview 內嵌圖片:非 active 行的 `![alt](url)` 換成 <img>(相對路徑解析成 raw)。 */
+class ImageWidget extends WidgetType {
+  constructor(
+    readonly src: string,
+    readonly alt: string,
+  ) {
+    super();
+  }
+  eq(o: ImageWidget) {
+    return o.src === this.src && o.alt === this.alt;
+  }
+  get estimatedHeight() {
+    return 120;
+  }
+  toDOM(view: EditorView) {
+    const img = document.createElement('img');
+    img.src = resolveRawSrc(this.src);
+    img.alt = this.alt;
+    img.style.cssText = 'max-width:100%;max-height:360px;vertical-align:bottom;border-radius:4px;';
+    img.addEventListener('load', () => view.requestMeasure()); // 載入後重量測,修正行位
+    img.addEventListener('error', () => {
+      img.replaceWith(document.createTextNode(`🖼 ${this.alt || this.src}`));
+    });
+    return img;
+  }
+  ignoreEvent() {
+    return false; // 點圖 → CM6 定位游標 → 該行變 active → 露出原始碼供編輯
+  }
+}
+
 /** 依游標位置決定哪些行要露出原始碼,其餘套 live-preview 裝飾。 */
 function buildDecorations(view: EditorView): DecorationSet {
   const { doc } = view.state;
@@ -685,6 +726,23 @@ function buildDecorations(view: EditorView): DecorationSet {
           return false;
         // 表格由 TableWidget 接手 → 行內樣式跳過(整塊被 widget 取代)。
         if (name === 'Table') return false;
+
+        // 圖片 ![alt](url):非 active 行整塊換成 <img> widget;active 行露原始碼。
+        // 不論如何都 return false(跳過子節點 URL/LinkMark,避免與 replace 重疊或部分隱藏)。
+        if (name === 'Image') {
+          if (!lineIsActive(node.from)) {
+            const m = /^!\[([^\]]*)\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+"[^"]*")?\s*\)/.exec(
+              doc.sliceString(node.from, node.to),
+            );
+            if (m) {
+              const url = m[2].replace(/^<|>$/g, ''); // 去掉 <url> 尖括號形式
+              ranges.push(
+                Decoration.replace({ widget: new ImageWidget(url, m[1]) }).range(node.from, node.to),
+              );
+            }
+          }
+          return false;
+        }
 
         const h = /^ATXHeading([1-6])$/.exec(name);
         if (h) {
