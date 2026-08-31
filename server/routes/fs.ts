@@ -38,6 +38,81 @@ interface Entry {
 // 預設略過的雜訊目錄
 const SKIP = new Set(['.git', 'node_modules', 'dist', 'build', '.vite']);
 
+// 內容搜尋上限(避免大 repo 掃爆 / 回應過大)
+const SEARCH_MAX_MATCHES = 2000; // 命中總數上限,達到即截斷
+const SEARCH_MAX_FILE = 2 * 1024 * 1024; // 單檔 > 2MB 不掃
+const SEARCH_SNIPPET = 300; // 回傳每行片段最長字元數
+const BINARY_SNIFF = 8000; // 判斷 binary:前 N bytes 出現 NUL → 視為二進位跳過
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+interface SearchMatch {
+  line: number; // 1-based
+  col: number; // 命中在(可能截斷的)片段內的起始 index
+  len: number; // 命中長度
+  text: string; // 該行片段(過長則以命中為中心開窗,前綴 …)
+}
+interface SearchFile {
+  path: string; // 相對 repo root
+  matches: SearchMatch[];
+}
+
+// 遞迴掃某目錄下所有檔,對每檔逐行比對 re;命中收進 out。達 SEARCH_MAX_MATCHES 即停(truncated)。
+async function searchDir(
+  dir: string,
+  repoRoot: string,
+  re: RegExp,
+  out: SearchFile[],
+  state: { count: number; truncated: boolean },
+): Promise<void> {
+  if (state.truncated) return;
+  const dirents = await fs.readdir(dir, { withFileTypes: true });
+  for (const d of dirents) {
+    if (state.truncated) return;
+    if (SKIP.has(d.name)) continue;
+    const full = path.join(dir, d.name);
+    if (d.isDirectory()) {
+      await searchDir(full, repoRoot, re, out, state);
+      continue;
+    }
+    if (!d.isFile()) continue;
+    let buf: Buffer;
+    try {
+      const st = await fs.stat(full);
+      if (st.size > SEARCH_MAX_FILE) continue;
+      buf = await fs.readFile(full);
+    } catch {
+      continue; // broken symlink / 讀取失敗 → 跳過
+    }
+    if (buf.subarray(0, BINARY_SNIFF).includes(0)) continue; // binary
+    const lines = buf.toString('utf8').split(/\r?\n/);
+    const fileMatches: SearchMatch[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      re.lastIndex = 0;
+      const m = re.exec(lines[i]);
+      if (!m) continue;
+      let text = lines[i];
+      let col = m.index;
+      if (text.length > SEARCH_SNIPPET) {
+        const start = Math.max(0, col - 40);
+        text = (start > 0 ? '…' : '') + text.slice(start, start + SEARCH_SNIPPET);
+        col = (start > 0 ? 1 : 0) + (col - start);
+      }
+      fileMatches.push({ line: i + 1, col, len: m[0].length, text });
+      state.count++;
+      if (state.count >= SEARCH_MAX_MATCHES) {
+        state.truncated = true;
+        break;
+      }
+    }
+    if (fileMatches.length) {
+      out.push({ path: path.relative(repoRoot, full), matches: fileMatches });
+    }
+  }
+}
+
 export default async function fsRoutes(app: FastifyInstance) {
   app.get('/api/repos', async () => {
     const entries = await fs.readdir(guard.base, { withFileTypes: true });
@@ -83,6 +158,29 @@ export default async function fsRoutes(app: FastifyInstance) {
       return { items };
     },
   );
+
+  // 跨檔內容搜尋(find in files;Eclipse Ctrl+H 式)。path-guard 鎖在 repo root 內,
+  // 跳 SKIP 目錄 / 大檔 / binary;regex 可選、預設不分大小寫;命中依檔分組,達上限截斷。
+  app.get<{
+    Params: { repo: string };
+    Querystring: { q?: string; regex?: string; case?: string };
+  }>('/api/:repo/search', async (req, reply) => {
+    const q = req.query.q ?? '';
+    if (!q) return { results: [], truncated: false };
+    const isRegex = req.query.regex === '1' || req.query.regex === 'true';
+    const caseSensitive = req.query.case === '1' || req.query.case === 'true';
+    let re: RegExp;
+    try {
+      re = new RegExp(isRegex ? q : escapeRegExp(q), 'g' + (caseSensitive ? '' : 'i'));
+    } catch {
+      return reply.code(400).send({ error: 'invalid regex' });
+    }
+    const repoRoot = guard.repoRoot(req.params.repo);
+    const out: SearchFile[] = [];
+    const state = { count: 0, truncated: false };
+    await searchDir(repoRoot, repoRoot, re, out, state);
+    return { results: out, truncated: state.truncated };
+  });
 
   app.get<{ Params: { repo: string }; Querystring: { path?: string } }>(
     '/api/:repo/file',

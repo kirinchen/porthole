@@ -59,8 +59,9 @@ import {
   AppstoreOutlined,
   BarsOutlined,
   DownloadOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
-import { api, type TreeItem } from '../lib/api';
+import { api, type TreeItem, type SearchFile } from '../lib/api';
 import Markdown from '../components/Markdown';
 import EnvView from '../components/EnvView';
 import Outline, { headingLineNumbers } from '../components/Outline';
@@ -433,6 +434,22 @@ interface ExploreCtx {
   onMoveLoadData: (node: { value?: React.Key }) => Promise<void>;
   treeMin: boolean;
   setTreeMin: (b: boolean) => void;
+  // 內容搜尋(Eclipse Ctrl+H 式;左側樹面板內切換)
+  searchMode: boolean;
+  setSearchMode: (b: boolean) => void;
+  searchQ: string;
+  setSearchQ: (s: string) => void;
+  searchRegex: boolean;
+  setSearchRegex: (b: boolean) => void;
+  searchCase: boolean;
+  setSearchCase: (b: boolean) => void;
+  searchResults: SearchFile[];
+  searchLoading: boolean;
+  searchErr: string | null;
+  searchTruncated: boolean;
+  searchRan: boolean;
+  runSearch: () => void;
+  openHit: (path: string, line: number) => void; // 點搜尋結果 → 開檔並(md)跳到該行
   onLoadData: (node: TreeDataNode) => Promise<void>;
   onSelect: (keys: React.Key[], info: { node: TreeDataNode }) => void;
   refresh: () => void;
@@ -493,6 +510,16 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   const [loadingFile, setLoadingFile] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  // 內容搜尋(Ctrl+H;樹面板內切換)
+  const [searchMode, setSearchMode] = useState(false);
+  const [searchQ, setSearchQ] = useState('');
+  const [searchRegex, setSearchRegex] = useState(false);
+  const [searchCase, setSearchCase] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchFile[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchErr, setSearchErr] = useState<string | null>(null);
+  const [searchTruncated, setSearchTruncated] = useState(false);
+  const [searchRan, setSearchRan] = useState(false);
   const [draft, setDraft] = useState('');
   // draftRef:同步保存最新內容,供 window 'porthole:save-file' 事件(GUI Ctrl+S)即時存檔,
   // 不受 React state 非同步影響(CM6 onChange 同步更新此 ref)。
@@ -760,6 +787,42 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     [repo, revealAncestors, writeUrl, loadFolderView, scrollSectionWhenReady],
   );
 
+  // 跑內容搜尋(呼叫後端;結果依檔分組)。
+  const runSearch = useCallback(async () => {
+    const q = searchQ.trim();
+    if (!q) {
+      setSearchResults([]);
+      setSearchRan(false);
+      setSearchErr(null);
+      return;
+    }
+    setSearchLoading(true);
+    setSearchErr(null);
+    try {
+      const r = await api.search(repo, q, { regex: searchRegex, caseSensitive: searchCase });
+      setSearchResults(r.results);
+      setSearchTruncated(r.truncated);
+      setSearchRan(true);
+    } catch (e) {
+      setSearchErr(e instanceof Error ? e.message : '搜尋失敗');
+      setSearchResults([]);
+      setSearchTruncated(false);
+      setSearchRan(true);
+    } finally {
+      setSearchLoading(false);
+    }
+  }, [repo, searchQ, searchRegex, searchCase]);
+
+  // 點搜尋結果 → 開檔;markdown 進編輯器並捲到該行(preview 無任意行錨點,故用 CM6 initialLine)。
+  const openHit = useCallback(
+    async (p: string, line: number) => {
+      await navigateTo(p, undefined, true);
+      editInitialLineRef.current = Math.max(0, line - 1);
+      setEditing(true);
+    },
+    [navigateTo],
+  );
+
   // 連結點擊導航(MarkdownEditor 派 porthole:navigate)。跨 repo → 暫存,待 repo 換好再開。
   useEffect(() => {
     const onNav = (e: Event) => {
@@ -926,6 +989,19 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [editing]);
+
+  // Ctrl/Cmd+H → 開內容搜尋(樹面板內切換)。擋掉瀏覽器預設(Chrome 的歷史紀錄)。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') {
+        e.preventDefault();
+        setSearchMode(true);
+        setTreeMin(false); // 若樹最小化 → 先還原,才看得到搜尋面板
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // 重新整理:重載樹 + 重抓目前開啟檔內容(看 agent 改後結果)。編輯模式也重載,
   // 但有「未儲存編輯」時略過以免蓋掉(先存或取消)。圖片以 reloadSeq cache-bust。
@@ -1238,6 +1314,21 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     onMoveLoadData,
     treeMin,
     setTreeMin,
+    searchMode,
+    setSearchMode,
+    searchQ,
+    setSearchQ,
+    searchRegex,
+    setSearchRegex,
+    searchCase,
+    setSearchCase,
+    searchResults,
+    searchLoading,
+    searchErr,
+    searchTruncated,
+    searchRan,
+    runSearch: () => void runSearch(),
+    openHit: (p: string, line: number) => void openHit(p, line),
     onLoadData,
     onSelect,
     refresh,
@@ -1255,10 +1346,131 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
+/** 一行命中:行號 + 片段(命中 substring 標黃底)。 */
+function HitLine({ text, col, len }: { text: string; col: number; len: number }) {
+  const before = text.slice(0, col);
+  const hit = text.slice(col, col + len);
+  const after = text.slice(col + len);
+  return (
+    <span style={{ whiteSpace: 'pre', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}>
+      {before}
+      <mark style={{ background: '#fff1a8', padding: 0 }}>{hit}</mark>
+      {after}
+    </span>
+  );
+}
+
+/** 內容搜尋面板(Eclipse Ctrl+H 式):搜尋框 + Aa/正則切換 + 結果依檔分組,點命中開檔跳行。 */
+function SearchPanel() {
+  const c = useExplore();
+  const totalHits = c.searchResults.reduce((n, f) => n + f.matches.length, 0);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }} data-loc="explore:search">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}>
+        <Button
+          size="small"
+          icon={<LeftOutlined />}
+          onClick={() => c.setSearchMode(false)}
+          title="返回檔案樹"
+          data-loc="explore:search:back"
+        />
+        <Input
+          autoFocus
+          size="small"
+          placeholder="搜尋檔案內容…"
+          value={c.searchQ}
+          onChange={(e) => c.setSearchQ(e.target.value)}
+          onPressEnter={c.runSearch}
+          allowClear
+          data-loc="explore:search:input"
+          suffix={
+            <Space size={2}>
+              <Button
+                size="small"
+                type={c.searchCase ? 'primary' : 'text'}
+                onClick={() => c.setSearchCase(!c.searchCase)}
+                title="區分大小寫"
+                style={{ fontSize: 11, height: 20, padding: '0 4px' }}
+                data-loc="explore:search:case"
+              >
+                Aa
+              </Button>
+              <Button
+                size="small"
+                type={c.searchRegex ? 'primary' : 'text'}
+                onClick={() => c.setSearchRegex(!c.searchRegex)}
+                title="正則表達式"
+                style={{ fontSize: 11, height: 20, padding: '0 4px' }}
+                data-loc="explore:search:regex"
+              >
+                .*
+              </Button>
+            </Space>
+          }
+        />
+        <Button size="small" type="primary" icon={<SearchOutlined />} onClick={c.runSearch} data-loc="explore:search:run" />
+      </div>
+      {c.searchErr && <Alert type="error" message={c.searchErr} style={{ marginBottom: 6 }} />}
+      {c.searchRan && !c.searchErr && (
+        <Typography.Text type="secondary" style={{ fontSize: 11, marginBottom: 6 }}>
+          {c.searchResults.length} 個檔案 / {totalHits} 處命中{c.searchTruncated ? '(已達上限,結果截斷)' : ''}
+        </Typography.Text>
+      )}
+      <div style={{ flex: 1, overflow: 'auto', minHeight: 0, margin: '0 -8px', padding: '0 8px' }} data-loc="explore:search:results">
+        {c.searchLoading ? (
+          <Spin />
+        ) : c.searchRan && c.searchResults.length === 0 && !c.searchErr ? (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            無符合結果
+          </Typography.Text>
+        ) : (
+          c.searchResults.map((f) => (
+            <div key={f.path} style={{ marginBottom: 6 }} data-loc="explore:search:file">
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: '2px 0',
+                  color: '#333',
+                }}
+                title={f.path}
+              >
+                <FileOutlined style={{ color: '#888', flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.path}</span>
+                <span style={{ color: '#aaa', flexShrink: 0 }}>({f.matches.length})</span>
+              </div>
+              {f.matches.map((m, i) => (
+                <div
+                  key={i}
+                  onClick={() => c.openHit(f.path, m.line)}
+                  className="ph-search-hit"
+                  data-loc="explore:search:hit"
+                  data-path={f.path}
+                  data-line={m.line}
+                >
+                  <span style={{ color: '#aaa', minWidth: 34, textAlign: 'right', flexShrink: 0, fontSize: 11 }}>
+                    {m.line}
+                  </span>
+                  <HitLine text={m.text} col={m.col} len={m.len} />
+                </div>
+              ))}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** 檔案樹面板(新檔 / 最小化鈕 + Tree)。 */
 function TreePanel() {
   const c = useExplore();
   const fileRef = useRef<HTMLInputElement>(null);
+  if (c.searchMode) return <SearchPanel />;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -1292,6 +1504,12 @@ function TreePanel() {
             onClick={() => window.dispatchEvent(new Event('porthole:pick:start'))}
             title="引用內容:點檔案 / 內容 → 複製引用到剪貼簿(Cursor 式)"
             data-loc="explore:pick"
+          />
+          <Button
+            icon={<SearchOutlined />}
+            onClick={() => c.setSearchMode(true)}
+            title="搜尋檔案內容(Ctrl+H)"
+            data-loc="explore:search:open"
           />
         </Space.Compact>
         {!c.isMobile && (

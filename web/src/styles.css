@@ -148,6 +148,20 @@ body {
   border-radius: 4px;
 }
 
+/* 搜尋結果命中行:行號 + 片段,hover 反白,點擊開檔跳行 */
+.ph-search-hit {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 1px 4px 1px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.ph-search-hit:hover {
+  background: #f0f7ff;
+}
+
 /* 表格 cell 失焦時「縮起的連結」:overlay 本體 pointer-events:none,唯 <a> 可 hover/點 */
 .ph-cell-link {
   pointer-events: auto;

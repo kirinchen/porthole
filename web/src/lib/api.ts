@@ -11,6 +11,17 @@ export interface TreeItem {
   size?: number; // 檔案大小(bytes);dir 無,僅帶 stat 時有
 }
 
+export interface SearchMatch {
+  line: number; // 1-based
+  col: number; // 命中在片段內的起始 index
+  len: number; // 命中長度
+  text: string; // 該行片段(過長則開窗 + 前綴 …)
+}
+export interface SearchFile {
+  path: string;
+  matches: SearchMatch[];
+}
+
 export interface ClaudeSession {
   id: string;
   mtime: number;
@@ -42,6 +53,17 @@ export const api = {
   file: (repo: string, path: string) =>
     jget<{ content: string; markdown: boolean; ext: string }>(
       `/api/${repo}/file?path=${encodeURIComponent(path)}`,
+    ),
+
+  /** 跨檔內容搜尋(find in files);path-guard 在後端把關。 */
+  search: (
+    repo: string,
+    q: string,
+    opts: { regex?: boolean; caseSensitive?: boolean } = {},
+  ) =>
+    jget<{ results: SearchFile[]; truncated: boolean }>(
+      `/api/${encodeURIComponent(repo)}/search?q=${encodeURIComponent(q)}` +
+        `${opts.regex ? '&regex=1' : ''}${opts.caseSensitive ? '&case=1' : ''}`,
     ),
 
   /** 原始位元組 URL(圖片 <img src> 用);path-guard 在後端把關。 */

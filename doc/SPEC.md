@@ -83,6 +83,7 @@ Chat / Session / CLI,**保活不卸載**(切走不斷 session 終端 WS)。中�
 
 ### 4.1 Explore
 - files tree(抄 InRay `features/repo`),根 = active repo root。
+- **內容搜尋(find in files;Eclipse Ctrl+H 式)**:工具列搜尋鈕 / **Ctrl+H** → 左側樹面板內切換成搜尋 UI(搜尋框 + `Aa` 區分大小寫 / `.*` 正則切換 + 結果依檔分組,命中片段標黃底);返回鈕切回樹。後端 `GET /api/:repo/search?q=&regex=&case=`:自 repo root 遞迴 Node walk(path-guard;跳 `SKIP` 目錄 / >2MB / binary(前 8KB 見 NUL)),逐行比對(regex 可選、預設不分大小寫),命中回 `{path, matches:[{line,col,len,text}]}`;命中總數上限 2000(達到即 `truncated`),過長行以命中為中心開窗(前綴 `…`)。點命中 → 開檔;**markdown 進 CM6 編輯器並捲到該行**(preview 無任意行錨點,故用 `initialLine`),其他檔開啟(textarea)。
 - 點檔案 → 右側預覽(markdown 走 remark/rehype 渲染;圖片(png/jpg/gif/webp/svg/bmp/ico/avif)以 `<img>` 顯示,來源 `GET /api/:repo/raw`(path-guard、依副檔名給 content-type);**`.excalidraw`** 以 Excalidraw 白板編輯器開(自由繪圖,Google Drawing 式;存檔 serializeAsJSON 寫回 JSON,Ctrl+S / 儲存鈕;`@excalidraw/excalidraw` lazy 載入);**`.env`(含 `.env.*` / `*.env`)** 預覽美化成 KEY/VALUE 表(`EnvView`:註解分段、值可一鍵複製 / 整體遮罩,編輯仍走原始 textarea 不破壞格式);其他純文字)。
 - **下載檔案**:預覽工具列「下載」鈕(當前開啟檔,新檔/編輯中不顯示)+ 左側樹每個**檔案**節點的下載動作 → `GET /api/:repo/raw?download=1`(`Content-Disposition: attachment`,`filename*` RFC5987 編碼支援中文;沿用 raw 的 25MB 上限與 path-guard;不帶 `download` 時維持 inline 供圖片預覽)。前端以隱藏 `a[download]` 觸發,不經 SDK。
 - 點**資料夾** → 中央顯示該夾內容(可點:檔案開檔、子夾鑽入)+ 其 `README.md`(若有,case-insensitive)渲染於下。
