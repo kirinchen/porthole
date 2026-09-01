@@ -477,7 +477,11 @@ const linkNav = EditorView.domEventHandlers({
     const target = resolveLink(href, repo, cur?.path ?? '');
     if (!target) return true;
     if (target.kind === 'external') window.open(target.url, '_blank', 'noopener');
-    else window.dispatchEvent(new CustomEvent('porthole:navigate', { detail: target }));
+    else
+      window.dispatchEvent(
+        // Ctrl/Cmd+click → 開新分頁(否則取代目前分頁)
+        new CustomEvent('porthole:navigate', { detail: { ...target, newTab: e.ctrlKey || e.metaKey } }),
+      );
     return true;
   },
 });

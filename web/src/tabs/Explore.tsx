@@ -434,6 +434,10 @@ interface ExploreCtx {
   onMoveLoadData: (node: { value?: React.Key }) => Promise<void>;
   treeMin: boolean;
   setTreeMin: (b: boolean) => void;
+  // VSCode 式多分頁(active = selPath)
+  openTabs: string[];
+  activateTab: (path: string) => void;
+  closeTab: (path: string) => void;
   // 內容搜尋(Eclipse Ctrl+H 式;左側樹面板內切換)
   searchMode: boolean;
   setSearchMode: (b: boolean) => void;
@@ -505,6 +509,25 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   useEffect(() => {
     folderViewRef.current = folderView;
   }, [folderView]);
+  // VSCode 式多分頁:開啟的檔案路徑清單(有序);active = selPath。
+  const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const selPathRef = useRef<string | null>(null); // noteOpenTab「取代目前分頁」需讀切換前的 active
+  useEffect(() => {
+    selPathRef.current = selPath;
+  }, [selPath]);
+
+  // 記錄開啟某檔為分頁。mode='new':累積新分頁(Ctrl+click / tree 點檔);
+  // mode='active':取代目前 active 分頁(一般點 link)。已開的檔一律去重(只切換不重複)。
+  const noteOpenTab = useCallback((path: string, mode: 'active' | 'new') => {
+    setOpenTabs((prev) => {
+      if (prev.includes(path)) return prev; // 已開 → 列表不動(呼叫端會切為 active)
+      const activeIdx = prev.indexOf(selPathRef.current ?? '');
+      if (mode === 'new' || activeIdx < 0) return [...prev, path];
+      const next = [...prev];
+      next[activeIdx] = path; // 取代目前 active 那格
+      return next;
+    });
+  }, []);
   const pendingNavRef = useRef<{ path: string; tab?: string; section?: string } | null>(null); // 跨 repo 連結待開
   const didInitNav = useRef(false); // 初次載入是否已依 URL 開檔
   const [reloadSeq, setReloadSeq] = useState(0); // refresh 重載編輯器/圖片(換 key / cache-bust)
@@ -567,6 +590,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setSel(null);
     setSelPath(null);
     setSelectedKeys([]);
+    setOpenTabs([]); // 換 repo → 清分頁
     setCurrentFile(null);
     setBaseDir('');
     setExpandedKeys([]);
@@ -685,6 +709,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       return;
     }
     setFolderView(null); // 選檔 → 清資料夾視圖
+    noteOpenTab(n.path, 'new'); // tree 點檔 → 開/切分頁(累積)
     setErr(null);
     setEditing(false);
     setSaveErr(null);
@@ -734,11 +759,12 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   /** 導航到 repo 內路徑:先試當檔案開,失敗試當資料夾展開;都不行 → 錯誤。並同步網址列。
    *  push=true(連結 / grid 點擊)→ 留歷史可上一頁;false(deep-link 載入 / popstate)→ 取代。 */
   const navigateTo = useCallback(
-    async (rawPath: string, tab?: string, push = true, section?: string) => {
+    async (rawPath: string, tab?: string, push = true, section?: string, tabMode: 'active' | 'new' = 'active') => {
       const p = rawPath.replace(/^\/+|\/+$/g, '');
       if (!p) return;
       // 圖片:不抓文字,直接 <img> 預覽(圖片必為檔案)。
       if (isImage(p)) {
+        noteOpenTab(p, tabMode);
         setFolderView(null);
         setEditing(false);
         setErr(null);
@@ -755,6 +781,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       // 檔案
       try {
         const f = await api.file(repo, p);
+        noteOpenTab(p, tabMode);
         setFolderView(null);
         setEditing(false);
         setErr(null);
@@ -785,7 +812,41 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
         setErr(`找不到連結目標:${p}`);
       }
     },
-    [repo, revealAncestors, writeUrl, loadFolderView, scrollSectionWhenReady],
+    [repo, revealAncestors, writeUrl, loadFolderView, scrollSectionWhenReady, noteOpenTab],
+  );
+
+  // 切到某已開分頁(載入該檔)。noteOpenTab 去重故不會重複加。
+  const activateTab = useCallback(
+    (path: string) => {
+      if (path === selPathRef.current) return;
+      void navigateTo(path, undefined, true);
+    },
+    [navigateTo],
+  );
+
+  // 關閉某分頁;若關的是 active → 切到鄰居(右優先,無則左),都沒有 → 清空預覽。
+  const closeTab = useCallback(
+    (path: string) => {
+      setOpenTabs((prev) => {
+        const idx = prev.indexOf(path);
+        if (idx < 0) return prev;
+        const next = prev.filter((p) => p !== path);
+        if (path === selPathRef.current) {
+          const nb = next[idx] ?? next[idx - 1] ?? null;
+          if (nb) {
+            void navigateTo(nb, undefined, true);
+          } else {
+            setSel(null);
+            setSelPath(null);
+            setSelectedKeys([]);
+            setEditing(false);
+            setCurrentFile(null);
+          }
+        }
+        return next;
+      });
+    },
+    [navigateTo],
   );
 
   // 跑內容搜尋(呼叫後端;結果依檔分組)。
@@ -827,13 +888,19 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   // 連結點擊導航(MarkdownEditor 派 porthole:navigate)。跨 repo → 暫存,待 repo 換好再開。
   useEffect(() => {
     const onNav = (e: Event) => {
-      const d = (e as CustomEvent).detail as { repo?: string; path?: string; tab?: string; section?: string };
+      const d = (e as CustomEvent).detail as {
+        repo?: string;
+        path?: string;
+        tab?: string;
+        section?: string;
+        newTab?: boolean; // Ctrl/Cmd+click md link → 開新分頁(否則取代目前分頁)
+      };
       if (!d?.path) return; // 純切 tab(無 path)交給 App 處理
       if (d.repo && d.repo !== repo) {
         pendingNavRef.current = { path: d.path, tab: d.tab, section: d.section };
         return; // App 會 setRepo;換好後由 repo 變更 effect 接手開檔
       }
-      void navigateTo(d.path, d.tab, true, d.section);
+      void navigateTo(d.path, d.tab, true, d.section, d.newTab ? 'new' : 'active');
     };
     window.addEventListener('porthole:navigate', onNav);
     return () => window.removeEventListener('porthole:navigate', onNav);
@@ -1065,6 +1132,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setSaveErr(null);
     setSel({ path: p, content: '', markdown: isMd(p), isNew: true, excalidraw: isExcalidraw(p), env: isEnv(p) });
     setSelPath(p);
+    noteOpenTab(p, 'new'); // 新檔也成一個分頁
     if (isExcalidraw(p)) {
       setEditing(false); // .excalidraw:直接開白板編輯器(preview 分支),非文字編輯;首存於 saveFileContent 補進樹
     } else {
@@ -1331,6 +1399,9 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     onMoveLoadData,
     treeMin,
     setTreeMin,
+    openTabs,
+    activateTab: (p: string) => activateTab(p),
+    closeTab: (p: string) => closeTab(p),
     searchMode,
     setSearchMode,
     searchQ,
@@ -1684,6 +1755,61 @@ export function ExploreTree() {
   );
 }
 
+/** VSCode 式分頁列:開啟的檔案為分頁,點切換、× 關閉;active = selPath。 */
+function TabStrip() {
+  const c = useExplore();
+  if (c.openTabs.length === 0) {
+    return (
+      <Typography.Text type="secondary" ellipsis style={{ flex: 1, minWidth: 0 }}>
+        選一個項目
+      </Typography.Text>
+    );
+  }
+  const isNewPath = c.sel?.isNew ? c.sel.path : null;
+  return (
+    <div
+      style={{ flex: 1, minWidth: 0, display: 'flex', gap: 4, overflowX: 'auto', alignItems: 'center' }}
+      data-loc="explore:tabs"
+    >
+      {c.openTabs.map((p) => {
+        const active = p === c.selPath;
+        const name = p.split('/').pop() || p;
+        return (
+          <div
+            key={p}
+            className={`ph-tab${active ? ' ph-tab-active' : ''}`}
+            onMouseDown={(e) => {
+              if (e.button === 1) {
+                // 中鍵 → 關閉分頁
+                e.preventDefault();
+                c.closeTab(p);
+              }
+            }}
+            onClick={() => c.activateTab(p)}
+            title={p}
+            data-loc="explore:tab"
+            data-path={p}
+            data-active={active ? '1' : undefined}
+          >
+            <span className="ph-tab-name">
+              {name}
+              {p === isNewPath ? ' •' : ''}
+            </span>
+            <CloseOutlined
+              className="ph-tab-close"
+              onClick={(e) => {
+                e.stopPropagation();
+                c.closeTab(p);
+              }}
+              data-loc="explore:tab:close"
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** 預覽 / 編輯(中央主區)。 */
 export function ExplorePreview() {
   const c = useExplore();
@@ -1718,10 +1844,7 @@ export function ExplorePreview() {
               data-loc="explore:tree:toggle"
             />
           )}
-          <Typography.Text ellipsis style={{ flex: 1, minWidth: 0 }}>
-            {c.selPath ?? '選一個項目'}
-            {c.sel?.isNew && c.selPath === c.sel.path ? ' (新檔)' : ''}
-          </Typography.Text>
+          <TabStrip />
           {c.sel?.markdown && !c.editing && (
             <Outline text={c.sel.content} onJump={jumpHeading} />
           )}

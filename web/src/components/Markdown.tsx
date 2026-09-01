@@ -111,14 +111,15 @@ function MdLink({ href, children }: { href?: string; children?: React.ReactNode 
     ? `/${encodeURIComponent(internal.repo)}/${internal.path.split('/').map(encodeURIComponent).join('/')}${sec}#${hrefTab}`
     : href;
   const onClick = (e: React.MouseEvent) => {
-    if (!target || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; // 修飾鍵 → 瀏覽器預設(新分頁等)
+    if (!target || e.shiftKey || e.altKey) return; // shift/alt → 瀏覽器預設(新視窗 / 另存)
+    const newTab = e.metaKey || e.ctrlKey; // Ctrl/Cmd+click → 開新分頁(否則取代目前分頁)
     e.preventDefault();
     if (target.kind === 'external') {
       window.open(target.url, '_blank', 'noopener');
       return;
     }
-    // 同檔章節錨點(#slug)→ 直接捲動,不重載檔案;更新網址列以便分享。
-    if (target.section && target.path === (cur?.path ?? '') && target.repo === repo) {
+    // 同檔章節錨點(#slug,非新分頁)→ 直接捲動,不重載檔案;更新網址列以便分享。
+    if (!newTab && target.section && target.path === (cur?.path ?? '') && target.repo === repo) {
       history.replaceState(
         null,
         '',
@@ -127,7 +128,7 @@ function MdLink({ href, children }: { href?: string; children?: React.ReactNode 
       scrollToHeadingSlug(target.section);
       return;
     }
-    window.dispatchEvent(new CustomEvent('porthole:navigate', { detail: target }));
+    window.dispatchEvent(new CustomEvent('porthole:navigate', { detail: { ...target, newTab } }));
   };
   return (
     <a

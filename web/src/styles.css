@@ -148,6 +148,46 @@ body {
   border-radius: 4px;
 }
 
+/* VSCode 式分頁列 */
+.ph-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  max-width: 200px;
+  font-size: 13px;
+  color: #666;
+  background: #f5f5f5;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.ph-tab:hover {
+  background: #eee;
+}
+.ph-tab-active {
+  color: #1677ff;
+  background: #fff;
+  border-color: #1677ff;
+}
+.ph-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ph-tab-close {
+  font-size: 11px;
+  color: #aaa;
+  border-radius: 3px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+.ph-tab-close:hover {
+  color: #333;
+  background: rgba(0, 0, 0, 0.08);
+}
+
 /* 搜尋結果命中行:行號 + 片段,hover 反白,點擊開檔跳行 */
 .ph-search-hit {
   display: flex;
