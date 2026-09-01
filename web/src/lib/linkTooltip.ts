@@ -9,6 +9,22 @@
  *   - table cell:apply = 把選取子字串換成 [text](url)(onChange 回寫本地 model)。
  * detail 於「右鍵當下」就建好(選取範圍已知),故之後失焦 / 選取消失都不影響套用。
  */
+import { resolveLink } from './pathLink';
+import { getCurrentFile } from './currentFile';
+
+/** 開啟連結:相對路徑以目前開啟檔為基準解析 → 外部新分頁 / 站內派 porthole:navigate。 */
+function openLink(url: string): void {
+  const repo = decodeURIComponent(location.pathname.split('/').filter(Boolean)[0] ?? '');
+  const cur = getCurrentFile();
+  const target = url ? resolveLink(url, repo, cur?.path ?? '') : null;
+  if (!target) {
+    window.open(url, '_blank', 'noopener');
+    return;
+  }
+  if (target.kind === 'external') window.open(target.url, '_blank', 'noopener');
+  else window.dispatchEvent(new CustomEvent('porthole:navigate', { detail: target }));
+}
+
 export interface LinkEditDetail {
   /** 連結文字(選取字串;若選取已是 [t](u) 則為 t)。 */
   text: string;
@@ -37,27 +53,39 @@ export function closeLinkTip(): void {
 }
 
 /** 於 (x,y) 附近浮出連結鈕(label 預設「🔗 連結」,編輯既有連結可傳「🔗 編輯連結」);點擊 → 派 porthole:edit-link。 */
+function mkTipButton(text: string, onDown: () => void): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.textContent = text;
+  btn.style.cssText =
+    'border:none;background:transparent;cursor:pointer;font-size:13px;padding:4px 10px;' +
+    'border-radius:4px;white-space:nowrap;color:#1677ff;';
+  btn.onmouseenter = () => (btn.style.background = '#f0f7ff');
+  btn.onmouseleave = () => (btn.style.background = 'transparent');
+  // mousedown + preventDefault:不搶焦點(detail 已備妥,亦避免無謂閃動)。
+  btn.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    onDown();
+    closeLinkTip();
+  });
+  return btn;
+}
+
 export function showLinkTip(x: number, y: number, detail: LinkEditDetail, label = '🔗 連結'): void {
   closeLinkTip();
   const el = document.createElement('div');
   el.setAttribute('data-loc', 'explore:edit:linktip');
   el.style.cssText =
     'position:fixed;z-index:1500;background:#fff;border:1px solid #d9d9d9;border-radius:6px;' +
-    'box-shadow:0 2px 8px rgba(0,0,0,.15);padding:2px;';
-  const btn = document.createElement('button');
-  btn.textContent = label;
-  btn.style.cssText =
-    'border:none;background:transparent;cursor:pointer;font-size:13px;padding:4px 10px;' +
-    'border-radius:4px;white-space:nowrap;color:#1677ff;';
-  btn.onmouseenter = () => (btn.style.background = '#f0f7ff');
-  btn.onmouseleave = () => (btn.style.background = 'transparent');
-  // mousedown + preventDefault:不搶焦點(雖然 detail 已備妥,仍避免無謂閃動)。
-  btn.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    window.dispatchEvent(new CustomEvent<LinkEditDetail>('porthole:edit-link', { detail }));
-    closeLinkTip();
-  });
-  el.appendChild(btn);
+    'box-shadow:0 2px 8px rgba(0,0,0,.15);padding:2px;display:flex;gap:2px;';
+  el.appendChild(
+    mkTipButton(label, () =>
+      window.dispatchEvent(new CustomEvent<LinkEditDetail>('porthole:edit-link', { detail })),
+    ),
+  );
+  // 既有連結(有 url)才顯示「開啟連結」;插入新連結(url 空)無可開。
+  if (detail.url.trim()) {
+    el.appendChild(mkTipButton('↗ 開啟連結', () => openLink(detail.url)));
+  }
   document.body.appendChild(el);
   // 夾在視窗內(超出右/下邊 → 往左/上)。
   const rect = el.getBoundingClientRect();
