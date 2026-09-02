@@ -5,10 +5,11 @@
  *  - Ctrl+F12 開/關 pick 模式(頂部橫條提示)
  *  - hover 高亮游標下元素;click 算混合定位器 → 複製 + 角落 toast → 自動退出
  *  - Esc 退出
- *  - 剪貼簿 fallback:非安全上下文(http 區網)navigator.clipboard 為 undefined
- *    → textarea + execCommand('copy')
+ *  - 剪貼簿:走共用 lib/clipboard.copyText(非安全上下文 fallback 用 copy 事件攔截,
+ *    對 antd Modal 的 focus trap 免疫 —— 舊 textarea+focus 法在對話框內會複製到空字串)
  */
 import { useEffect, useRef, useState } from 'react';
+import { copyText } from './lib/clipboard';
 
 /** 短 CSS path:往上最多 5 層,遇 id / data-loc 即停。 */
 function cssPath(start: Element): string {
@@ -50,27 +51,6 @@ function buildLoc(el: Element): string {
   ]
     .filter(Boolean)
     .join('  |  ');
-}
-
-/** 複製文字,含非安全上下文 fallback。 */
-function copyText(text: string): void {
-  if (navigator.clipboard && window.isSecureContext) {
-    void navigator.clipboard.writeText(text);
-    return;
-  }
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.style.position = 'fixed';
-  ta.style.opacity = '0';
-  document.body.appendChild(ta);
-  ta.focus();
-  ta.select();
-  try {
-    document.execCommand('copy');
-  } catch {
-    /* 連 fallback 都失敗就算了 */
-  }
-  document.body.removeChild(ta);
 }
 
 const HILITE = 'porthole-devpick-hilite';
@@ -117,7 +97,7 @@ export default function DevPick() {
       const el = e.target as Element | null;
       if (!el) return;
       const loc = buildLoc(el);
-      copyText(loc);
+      void copyText(loc);
       setToast(loc);
       setActive(false);
       window.setTimeout(() => setToast(null), 4000);
