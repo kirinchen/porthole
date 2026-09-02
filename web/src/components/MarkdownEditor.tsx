@@ -60,6 +60,8 @@ interface Props {
 export interface MarkdownEditorHandle {
   /** 目前編輯器頂端可見的行(0-based);退編輯時用來把位置帶回 preview。 */
   topLine(): number;
+  /** 在游標處插入文字(如插入圖片 dialog 的 `![](path)`),並重新聚焦。 */
+  insertAtCursor(text: string): void;
 }
 
 /** 隱藏語法符號(零寬替換)。 */
@@ -881,6 +883,16 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function Markdown
         const pos = view.posAtCoords({ x: rect.left + 4, y: rect.top + 4 });
         if (pos == null) return 0;
         return view.state.doc.lineAt(pos).number - 1; // 1-based → 0-based
+      },
+      insertAtCursor(text: string) {
+        const view = viewRef.current;
+        if (!view) return;
+        const sel = view.state.selection.main;
+        view.dispatch({
+          changes: { from: sel.from, to: sel.to, insert: text },
+          selection: { anchor: sel.from + text.length },
+        });
+        view.focus();
       },
     }),
     [],

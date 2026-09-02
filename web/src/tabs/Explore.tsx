@@ -60,11 +60,13 @@ import {
   BarsOutlined,
   DownloadOutlined,
   SearchOutlined,
+  PictureOutlined,
 } from '@ant-design/icons';
 import { api, type TreeItem, type SearchFile } from '../lib/api';
 import Markdown from '../components/Markdown';
 import EnvView from '../components/EnvView';
 import Outline, { headingLineNumbers } from '../components/Outline';
+import ImagePickerDialog from '../components/ImagePickerDialog';
 import type { MarkdownEditorHandle } from '../components/MarkdownEditor';
 import { scrollToHeadingSlug } from '../lib/heading';
 import { setCurrentFile } from '../lib/currentFile';
@@ -1887,6 +1889,7 @@ function TabStrip() {
 /** 預覽 / 編輯(中央主區)。 */
 export function ExplorePreview() {
   const c = useExplore();
+  const [imgOpen, setImgOpen] = useState(false); // 插入圖片 dialog
   const newFileOpts = extOptions(c.newPath); // 新增檔:副檔名 smart hint
   // 目錄跳轉:序號對應 preview 裡第 N 個 heading 元素(順序與 parseHeadings 一致)。
   const jumpHeading = (i: number) => {
@@ -1934,6 +1937,16 @@ export function ExplorePreview() {
               下載
             </Button>
           )}
+          {c.editing && c.sel?.markdown && (
+            <Button
+              icon={<PictureOutlined />}
+              onClick={() => setImgOpen(true)}
+              title="插入圖片(瀏覽 repo 既有 / 上傳)"
+              data-loc="explore:img:open"
+            >
+              圖片
+            </Button>
+          )}
           {c.sel &&
             !c.sel.image &&
             !c.sel.excalidraw &&
@@ -1959,6 +1972,14 @@ export function ExplorePreview() {
             ))}
         </div>
       )}
+
+      <ImagePickerDialog
+        repo={c.repo}
+        baseDir={c.baseDir}
+        open={imgOpen}
+        onClose={() => setImgOpen(false)}
+        onInsert={(rel) => c.editorRef.current?.insertAtCursor(`![](${rel})`)}
+      />
 
       {(c.note || c.saveErr) && (
         <div style={{ padding: '8px 12px 0' }}>
