@@ -552,6 +552,40 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     draftRef.current = v;
     setDraft(v);
   }, []);
+  // 每分頁的編輯狀態(editing + 未存草稿 + 編輯器頂端行),供切分頁 / 重載還原。
+  const tabStateRef = useRef(new Map<string, { editing: boolean; draft: string; initialLine: number }>());
+  const editingRef = useRef(false);
+  useEffect(() => {
+    editingRef.current = editing;
+  }, [editing]);
+
+  // 編輯狀態同步到網址列(?edit=1),供切分頁 / 重載 / 上一頁還原;保留既有 ?sec 等參數。
+  useEffect(() => {
+    if (!selPath) return; // 無開啟檔(資料夾 / 空)不動 URL
+    const sp = new URLSearchParams(location.search);
+    if (editing) sp.set('edit', '1');
+    else sp.delete('edit');
+    const qs = sp.toString();
+    const url = location.pathname + (qs ? `?${qs}` : '') + location.hash;
+    if (url !== location.pathname + location.search + location.hash) {
+      history.replaceState(null, '', url);
+    }
+  }, [editing, selPath]);
+
+  // 切走某檔前:若正在編輯 → 記下未存草稿 + 頂端行,供切回時還原;非編輯 → 清掉記錄。
+  const snapshotActiveTab = useCallback(() => {
+    const p = selPathRef.current;
+    if (!p) return;
+    if (editingRef.current) {
+      tabStateRef.current.set(p, {
+        editing: true,
+        draft: draftRef.current,
+        initialLine: editorRef.current?.topLine() ?? 0,
+      });
+    } else {
+      tabStateRef.current.delete(p);
+    }
+  }, []);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -591,6 +625,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setSelPath(null);
     setSelectedKeys([]);
     setOpenTabs([]); // 換 repo → 清分頁
+    tabStateRef.current.clear(); // 連每分頁的編輯草稿記錄一起清
     setCurrentFile(null);
     setBaseDir('');
     setExpandedKeys([]);
@@ -616,7 +651,9 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
           }
         }
         didInitNav.current = true;
-        if (want?.path) void navigateTo(want.path, want.tab, false, want.section); // 初次/deep-link → 不新增歷史
+        // deep-link ?edit=1 → 開檔後直接進編輯。
+        const wantEdit = new URLSearchParams(location.search).get('edit') === '1';
+        if (want?.path) void navigateTo(want.path, want.tab, false, want.section, 'active', wantEdit); // 初次/deep-link → 不新增歷史
       })
       .catch((e: Error) => setErr(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -636,8 +673,12 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       const TABS = ['explore', 'chat', 'session', 'cli'];
       const t = tab && TABS.includes(tab) ? tab : location.hash.replace(/^#/, '') || 'explore';
       const enc = path.split('/').map(encodeURIComponent).join('/');
-      const sec = section ? `?sec=${encodeURIComponent(section)}` : '';
-      const url = `/${encodeURIComponent(repo)}/${enc}${sec}#${t}`;
+      // 一併帶 ?edit=1(編輯中)+ ?sec —— 否則導航重建 URL 會蓋掉 ?edit 效果加的值。
+      const params: string[] = [];
+      if (section) params.push(`sec=${encodeURIComponent(section)}`);
+      if (editingRef.current) params.push('edit=1');
+      const qs = params.length ? `?${params.join('&')}` : '';
+      const url = `/${encodeURIComponent(repo)}/${enc}${qs}#${t}`;
       if (push && location.pathname + location.search + location.hash !== url) {
         history.pushState(null, '', url);
       } else {
@@ -700,22 +741,24 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
 
   const onSelect = async (_keys: React.Key[], info: { node: TreeDataNode }) => {
     const n = info.node as Node;
+    snapshotActiveTab(); // 切走前記下目前分頁的編輯狀態 / 未存草稿
     setSelPath(n.path);
     setSelectedKeys([n.path]);
     setBaseDir(n.isLeaf ? parentDir(n.path) : n.path); // 選檔→父夾;選資料夾→該夾
     writeUrl(n.path, undefined, true); // 點選即同步網址列 + 留歷史(可上一頁)
     if (!n.isLeaf) {
+      setEditing(false);
       void loadFolderView(n.path); // 資料夾:中央顯示 grid + README
       return;
     }
     setFolderView(null); // 選檔 → 清資料夾視圖
     noteOpenTab(n.path, 'new'); // tree 點檔 → 開/切分頁(累積)
     setErr(null);
-    setEditing(false);
     setSaveErr(null);
     setNote(null);
     // 圖片:不抓文字內容,直接以 <img> 預覽。
     if (isImage(n.path)) {
+      setEditing(false);
       setSel({ path: n.path, content: '', markdown: false, image: true });
       setCurrentFile(null);
       setDrawerOpen(false);
@@ -727,8 +770,18 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       setSel({ path: n.path, content: f.content, markdown: f.markdown, excalidraw: isExcalidraw(n.path), env: isEnv(n.path) });
       setCurrentFile({ path: n.path, content: f.content }); // 供 ContentPick 推算行號
       setDrawerOpen(false); // 手機:選檔後關抽屜露出預覽
+      // 還原該分頁編輯狀態(切回正在編輯的分頁 → 續編 + 未存草稿還在)。
+      const saved = tabStateRef.current.get(n.path);
+      if (saved?.editing) {
+        editInitialLineRef.current = saved.initialLine;
+        setDraftSync(saved.draft);
+        setEditing(true);
+      } else {
+        setEditing(false);
+      }
     } catch (e) {
       setErr((e as Error).message);
+      setEditing(false);
     } finally {
       setLoadingFile(false);
     }
@@ -759,9 +812,17 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   /** 導航到 repo 內路徑:先試當檔案開,失敗試當資料夾展開;都不行 → 錯誤。並同步網址列。
    *  push=true(連結 / grid 點擊)→ 留歷史可上一頁;false(deep-link 載入 / popstate)→ 取代。 */
   const navigateTo = useCallback(
-    async (rawPath: string, tab?: string, push = true, section?: string, tabMode: 'active' | 'new' = 'active') => {
+    async (
+      rawPath: string,
+      tab?: string,
+      push = true,
+      section?: string,
+      tabMode: 'active' | 'new' = 'active',
+      wantEdit = false,
+    ) => {
       const p = rawPath.replace(/^\/+|\/+$/g, '');
       if (!p) return;
+      snapshotActiveTab(); // 切走前先記下目前分頁的編輯狀態 / 未存草稿
       // 圖片:不抓文字,直接 <img> 預覽(圖片必為檔案)。
       if (isImage(p)) {
         noteOpenTab(p, tabMode);
@@ -783,13 +844,21 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
         const f = await api.file(repo, p);
         noteOpenTab(p, tabMode);
         setFolderView(null);
-        setEditing(false);
         setErr(null);
         setSel({ path: p, content: f.content, markdown: f.markdown, excalidraw: isExcalidraw(p), env: isEnv(p) });
         setCurrentFile({ path: p, content: f.content });
         setSelPath(p);
         setBaseDir(parentDir(p));
         setDrawerOpen(false);
+        // 還原該分頁的編輯狀態:優先本分頁未存草稿(切分頁回來);wantEdit(deep-link ?edit=1)則以磁碟內容進編輯。
+        const saved = tabStateRef.current.get(p);
+        if (saved?.editing || (wantEdit && !isExcalidraw(p))) {
+          editInitialLineRef.current = saved?.editing ? saved.initialLine : 0;
+          setDraftSync(saved?.editing ? saved.draft : f.content);
+          setEditing(true);
+        } else {
+          setEditing(false);
+        }
         await revealAncestors(p);
         setSelectedKeys([p]);
         writeUrl(p, tab, push, section);
@@ -812,7 +881,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
         setErr(`找不到連結目標:${p}`);
       }
     },
-    [repo, revealAncestors, writeUrl, loadFolderView, scrollSectionWhenReady, noteOpenTab],
+    [repo, revealAncestors, writeUrl, loadFolderView, scrollSectionWhenReady, noteOpenTab, snapshotActiveTab, setDraftSync],
   );
 
   // 切到某已開分頁(載入該檔)。noteOpenTab 去重故不會重複加。
@@ -831,6 +900,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
         const idx = prev.indexOf(path);
         if (idx < 0) return prev;
         const next = prev.filter((p) => p !== path);
+        tabStateRef.current.delete(path); // 分頁關了 → 丟掉其未存草稿記錄
         if (path === selPathRef.current) {
           const nb = next[idx] ?? next[idx - 1] ?? null;
           if (nb) {
@@ -913,8 +983,10 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       if (segs[0] !== repo) return; // 跨 repo 交給 App(切 repo 後由 repo effect 接手)
       const path = segs.slice(1).join('/');
       if (path) {
-        const sec = new URLSearchParams(location.search).get('sec') || undefined;
-        void navigateTo(path, location.hash.replace(/^#/, '') || undefined, false, sec);
+        const params = new URLSearchParams(location.search);
+        const sec = params.get('sec') || undefined;
+        const wantEdit = params.get('edit') === '1';
+        void navigateTo(path, location.hash.replace(/^#/, '') || undefined, false, sec, 'active', wantEdit);
       } else {
         // 回到 repo 根(無 path)→ 清空中央視圖
         setSel(null);
@@ -996,6 +1068,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     rememberExitHeading();
     setEditing(false);
     setSaveErr(null);
+    if (selPathRef.current) tabStateRef.current.delete(selPathRef.current); // 取消 → 丟未存草稿記錄
     if (sel?.isNew) setSel(null); // 取消新檔 → 清掉
   };
 
@@ -1012,6 +1085,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       const wasNew = sel.isNew;
       setSel({ ...sel, content: latest, isNew: false });
       setEditing(false);
+      tabStateRef.current.delete(sel.path); // 已存 → 清掉該分頁未存草稿記錄
       setNote(`已儲存 ${sel.path}`);
       if (wasNew) reloadTree(); // 新檔 → 重載樹讓它出現
     } catch (e) {
