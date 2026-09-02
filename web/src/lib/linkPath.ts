@@ -70,6 +70,45 @@ function resolveDir(baseDir: string, expr: string, absolute: boolean): string {
   return normalizePath(baseDir ? `${baseDir}/${expr}` : expr);
 }
 
+// ---- 章節(`#section`)補全 ----
+
+export interface LinkSectionQuery {
+  /** 要列標題的檔(repo 相對);null = 目前編輯檔(`#` 起手,無路徑)。 */
+  filePath: string | null;
+  /** 過濾字首(以標題文字 / slug 比對)。 */
+  query: string;
+  /** 選中前要保留的字面(路徑段 + 單一 `#`;`##`/`###` 起手一律正規化成單一 `#`)。 */
+  insertBase: string;
+}
+
+/**
+ * 解析網址欄的「章節錨點」補全:含 `#` 時觸發。
+ *  - `#foo` / `##foo`(無路徑)→ 目前編輯檔的標題(`#` 數量正規化,產出單一 `#slug`)。
+ *  - `./a.md#foo`、`../x/y.md#foo`、`/a.md#foo` → 該檔的標題。
+ * 回 null = 不觸發(外部網址 `scheme:`、或 `#` 後已含空白 / 斜線 → 不再是 slug 打字中)。
+ */
+export function parseLinkSectionQuery(value: string, baseDir: string): LinkSectionQuery | null {
+  const hash = value.indexOf('#');
+  if (hash < 0) return null;
+  const head = value.slice(0, hash);
+  if (/^[a-z][a-z0-9+.-]*:/i.test(head)) return null; // https: 等外部網址不碰
+  const query = value.slice(hash).replace(/^#+/, ''); // 去起手的一或多個 #
+  if (/[\s/]/.test(query)) return null; // slug 不含空白 / 斜線
+  const filePath = head === '' ? null : resolveFilePath(baseDir, head);
+  return { filePath, query, insertBase: `${head}#` }; // 正規化成單一 #
+}
+
+/** 把 `#` 前的路徑段解成 repo 相對檔路徑(相對目前檔目錄 / 絕對 / 裸檔名)。 */
+function resolveFilePath(baseDir: string, head: string): string {
+  if (head.startsWith('/')) return normalizePath(head);
+  return normalizePath(baseDir ? `${baseDir}/${head}` : head);
+}
+
+/** 選中某標題 → 新的網址欄內容(路徑段 + `#` + slug)。 */
+export function applyLinkSectionChoice(q: LinkSectionQuery, slug: string): string {
+  return q.insertBase + slug;
+}
+
 /**
  * 選中某項目 → 新的網址欄內容。
  * 資料夾補尾斜線讓補全接著往下一層;檔名逸出會破壞 markdown 連結語法的字元。

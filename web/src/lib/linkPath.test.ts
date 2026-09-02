@@ -7,10 +7,12 @@ import assert from 'node:assert/strict';
 
 import {
   applyLinkPathChoice,
+  applyLinkSectionChoice,
   encodeLinkSegment,
   isPathExpression,
   parentInsertBase,
   parseLinkPathQuery,
+  parseLinkSectionQuery,
 } from './linkPath.ts';
 
 const BASE = 'doc/Wiki/guides'; // 假設目前編輯 doc/Wiki/guides/xxx.md
@@ -170,6 +172,55 @@ test('逸出會破壞 markdown 連結語法的字元(空白 / 括號)', () => {
   assert.equal(encodeLinkSegment('a(1).md'), 'a%281%29.md');
   assert.equal(encodeLinkSegment('會議 紀錄.md'), '會議%20紀錄.md');
   assert.equal(encodeLinkSegment('normal-name_1.md'), 'normal-name_1.md');
+});
+
+test('章節補全:`#` 起手 → 目前檔;數量正規化', () => {
+  assert.deepEqual(parseLinkSectionQuery('#foo', BASE), {
+    filePath: null,
+    query: 'foo',
+    insertBase: '#',
+  });
+  assert.deepEqual(parseLinkSectionQuery('##foo', BASE), {
+    filePath: null,
+    query: 'foo',
+    insertBase: '#',
+  });
+  assert.deepEqual(parseLinkSectionQuery('#', BASE), { filePath: null, query: '', insertBase: '#' });
+});
+
+test('章節補全:`路徑#` → 該檔標題(相對 / 上層 / 絕對)', () => {
+  assert.deepEqual(parseLinkSectionQuery('./a.md#foo', BASE), {
+    filePath: 'doc/Wiki/guides/a.md',
+    query: 'foo',
+    insertBase: './a.md#',
+  });
+  assert.deepEqual(parseLinkSectionQuery('../other.md#', BASE), {
+    filePath: 'doc/Wiki/other.md',
+    query: '',
+    insertBase: '../other.md#',
+  });
+  assert.deepEqual(parseLinkSectionQuery('/x/y.md#sec', BASE), {
+    filePath: 'x/y.md',
+    query: 'sec',
+    insertBase: '/x/y.md#',
+  });
+});
+
+test('章節補全:外部網址 / slug 後含空白或斜線 → 不觸發', () => {
+  assert.equal(parseLinkSectionQuery('https://a.com#top', BASE), null);
+  assert.equal(parseLinkSectionQuery('mailto:x@y.z#a', BASE), null);
+  assert.equal(parseLinkSectionQuery('#a b', BASE), null); // slug 不含空白
+  assert.equal(parseLinkSectionQuery('#a/b', BASE), null); // slug 不含斜線
+  assert.equal(parseLinkSectionQuery('./a.md', BASE), null); // 無 # → 非章節模式
+});
+
+test('章節補全:套用選擇 → `<路徑>#<slug>`', () => {
+  assert.equal(applyLinkSectionChoice(parseLinkSectionQuery('#前', BASE)!, '前言'), '#前言');
+  assert.equal(applyLinkSectionChoice(parseLinkSectionQuery('##特', BASE)!, '特徵集'), '#特徵集');
+  assert.equal(
+    applyLinkSectionChoice(parseLinkSectionQuery('./a.md#', BASE)!, '概述'),
+    './a.md#概述',
+  );
 });
 
 test('上一層 insertBase 推導', () => {

@@ -36,6 +36,36 @@ export function dedupeSlug(base: string, seen: Map<string, number>): string {
   return n === 0 ? base : `${base}-${n}`;
 }
 
+/** 從 markdown 取 ATX 標題文字(h1–h6),跳過 fenced code 區塊(與預覽 / #自動完成的標題集對齊)。 */
+export function headingsFromMarkdown(md: string): string[] {
+  const out: string[] = [];
+  let inFence = false;
+  let fenceChar = '';
+  for (const line of md.split('\n')) {
+    const fm = /^\s*(```+|~~~+)/.exec(line);
+    if (fm) {
+      const ch = fm[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = ch;
+      } else if (ch === fenceChar) {
+        inFence = false;
+      }
+      continue;
+    }
+    if (inFence) continue;
+    const m = /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
+    if (m) out.push(m[1].trim());
+  }
+  return out;
+}
+
+/** markdown → `[{text, slug}]`(文件序 dedupe slug,與錨點 / `#` 自動完成 / `?sec=` 一致)。 */
+export function headingSlugs(md: string): { text: string; slug: string }[] {
+  const seen = new Map<string, number>();
+  return headingsFromMarkdown(md).map((h) => ({ text: h, slug: dedupeSlug(slugifyHeading(h), seen) }));
+}
+
 /** 屬性選擇器值逸出(slug 可能含 `.` `(` 等;只需逸出 `"` 與 `\`)。 */
 function attrEscape(s: string): string {
   return s.replace(/["\\]/g, '\\$&');
