@@ -35,6 +35,7 @@ import MermaidBlock from './MermaidBlock';
 import D2Block from './D2Block';
 import ExcalidrawBlock from './ExcalidrawBlock';
 import TableBlock from './TableBlock';
+import PathUrlInput from './PathUrlInput';
 import { getCurrentFile } from '../lib/currentFile';
 import { resolveLink } from '../lib/pathLink';
 import { api } from '../lib/api';
@@ -445,6 +446,13 @@ const flowContextMenu = EditorView.domEventHandlers({
     return true;
   },
 });
+
+/** 目前編輯檔所在目錄(repo 相對,頂層為 '');連結網址的路徑補全以此為基準。 */
+function curFileDir(): string {
+  const p = getCurrentFile()?.path ?? '';
+  const i = p.lastIndexOf('/');
+  return i >= 0 ? p.slice(0, i) : '';
+}
 
 /** 取 pos 所在 Link 節點的 URL(原始碼);非連結回 null。 */
 function linkHrefAt(state: EditorState, pos: number): string | null {
@@ -983,13 +991,12 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function Markdown
           </div>
           <div>
             <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>網址</div>
-            <Input
-              autoFocus
+            <PathUrlInput
               value={link.url}
-              onChange={(e) => setLink((l) => ({ ...l, url: e.target.value }))}
-              onPressEnter={applyLink}
-              placeholder="https://… 或站內相對路徑"
-              data-loc="explore:edit:link:url"
+              onChange={(url) => setLink((l) => ({ ...l, url }))}
+              onSubmit={applyLink}
+              baseDir={curFileDir()}
+              placeholder="https://… 或 . / .. / 起手補全站內路徑"
             />
           </div>
         </div>
