@@ -1890,6 +1890,12 @@ function TabStrip() {
 export function ExplorePreview() {
   const c = useExplore();
   const [imgOpen, setImgOpen] = useState(false); // 插入圖片 dialog
+  // 空白行右鍵選單「插入圖片」→ 派 porthole:insert-image → 開同一 dialog。
+  useEffect(() => {
+    const onOpen = () => setImgOpen(true);
+    window.addEventListener('porthole:insert-image', onOpen);
+    return () => window.removeEventListener('porthole:insert-image', onOpen);
+  }, []);
   const newFileOpts = extOptions(c.newPath); // 新增檔:副檔名 smart hint
   // 目錄跳轉:序號對應 preview 裡第 N 個 heading 元素(順序與 parseHeadings 一致)。
   const jumpHeading = (i: number) => {

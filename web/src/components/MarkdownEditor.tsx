@@ -391,7 +391,7 @@ function onDocMouseDown(e: MouseEvent) {
 function onDocKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape') closeFlowMenu();
 }
-function showFlowMenu(x: number, y: number, onPick: (code: string) => void) {
+function showFlowMenu(x: number, y: number, onPick: (code: string) => void, onImage: () => void) {
   closeFlowMenu();
   const menu = document.createElement('div');
   menu.setAttribute('data-loc', 'explore:edit:flowmenu');
@@ -400,24 +400,28 @@ function showFlowMenu(x: number, y: number, onPick: (code: string) => void) {
     'box-shadow:0 2px 8px rgba(0,0,0,.15);padding:4px;font-size:13px;' +
     'max-height:calc(100vh - 16px);overflow-y:auto;' +
     `left:${x}px;top:${y}px;`;
-  const head = document.createElement('div');
-  head.textContent = '插入圖表(GUI 可編輯)';
-  head.style.cssText = 'padding:4px 12px;color:#999;font-size:11px;';
-  menu.appendChild(head);
-  for (const s of GUI_SAMPLES) {
+  // 用 mousedown(早於 outside-close 的 click),preventDefault 不讓編輯器失焦。
+  const addItem = (label: string, run: () => void, loc?: string) => {
     const item = document.createElement('div');
-    item.textContent = s.label;
+    item.textContent = label;
     item.style.cssText = 'padding:6px 12px;cursor:pointer;border-radius:4px;white-space:nowrap;';
+    if (loc) item.setAttribute('data-loc', loc);
     item.onmouseenter = () => (item.style.background = '#f0f0f0');
     item.onmouseleave = () => (item.style.background = '');
-    // 用 mousedown(早於 outside-close 的 click),preventDefault 不讓編輯器失焦。
     item.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      onPick(s.code);
+      run();
       closeFlowMenu();
     });
     menu.appendChild(item);
-  }
+  };
+  // 插入圖片(瀏覽 repo 既有 / 上傳)——與工具列「圖片」鈕同一 dialog。
+  addItem('🖼 插入圖片', onImage, 'explore:edit:flowmenu:image');
+  const head = document.createElement('div');
+  head.textContent = '插入圖表(GUI 可編輯)';
+  head.style.cssText = 'padding:4px 12px 4px;color:#999;font-size:11px;border-top:1px solid #f0f0f0;margin-top:2px;';
+  menu.appendChild(head);
+  for (const s of GUI_SAMPLES) addItem(s.label, () => onPick(s.code));
   document.body.appendChild(menu);
   // 夾在視窗內:超出右/下邊 → 往左/上對齊(避免靠近底部時被切掉)。
   const rect = menu.getBoundingClientRect();
@@ -438,13 +442,22 @@ const flowContextMenu = EditorView.domEventHandlers({
     const line = view.state.doc.lineAt(pos);
     if (line.text.trim() !== '') return false; // 非空白行 → 用瀏覽器原生選單
     event.preventDefault();
-    showFlowMenu(event.clientX, event.clientY, (code) => {
-      view.dispatch({
-        changes: { from: line.from, to: line.to, insert: code },
-        selection: { anchor: line.from + code.length },
-      });
-      view.focus();
-    });
+    showFlowMenu(
+      event.clientX,
+      event.clientY,
+      (code) => {
+        view.dispatch({
+          changes: { from: line.from, to: line.to, insert: code },
+          selection: { anchor: line.from + code.length },
+        });
+        view.focus();
+      },
+      () => {
+        // 插入圖片:先把游標移到該空白行,再開 dialog(插入時 insertAtCursor 落在此處)。
+        view.dispatch({ selection: { anchor: line.from } });
+        window.dispatchEvent(new Event('porthole:insert-image'));
+      },
+    );
     return true;
   },
 });
