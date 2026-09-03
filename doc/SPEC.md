@@ -111,7 +111,8 @@ Chat / Session / CLI,**保活不卸載**(切走不斷 session 終端 WS)。中�
     - **class**(`mermaidClass` + `ClassEditor`):類別(stereotype + 成員 visibility/attr/method)+ 關係(繼承/組合/聚合/關聯/依賴/實現 + multiplicity + 標籤)。
     - **sequence**(`mermaidSequence` + `SequenceEditor`,**清單式表單非畫布**):participant/actor(alias)+ 有序訊息(8 種箭頭 + activation)。
     - **architecture**(`mermaidArchitecture` + `ArchitectureEditor`):group(可巢狀)+ service(icon/title)+ junction + 邊(L/R/T/B 側接點 + 箭頭方向 + group 端點)。
-    - **mindmap**(`mermaidMindmap` + `MindmapEditor`):縮排式樹(單 root 不變式)+ 節點形狀(預設/方/圓角/圓/六角/雲/爆炸)+ icon/class;階層用邊表達,拖把手連線=改 parent(防環/防多 root),新增子/兄弟、刪子樹。
+    - **mindmap**(`mermaidMindmap` + `MindmapEditor` + `mindmapGraph`):縮排式樹(單 root 不變式)+ 節點形狀(預設/方/圓角/圓/六角/雲/爆炸)+ icon/class;階層用邊表達,拖把手連線=改 parent(防環/防多 root),新增子/兄弟、刪子樹。
+      **改 parent 一定會換掉 target 原本那條 parent 邊**(樹:一節點只有一個 parent)→ 換完 message 明講「X 由 A 改掛到 B」並自動重排版 + 重框視野,否則看起來像「拉了新線、某條既有的邊憑空消失」。邊 id 由 target 導出(`me-<target>`),不用遞增序號,結構上排除撞號蓋邊。空文字節點序列化成 `id[" "]`(mermaid 文法不接受 `id[""]`,會整張圖 parse 失敗)。圖 ⇄ 模型 的純邏輯抽在 `lib/mindmapGraph`,連線→存回→讀回的 round-trip 有單元測試。
     - 各圖型只支援其子集;subgraph / composite state / loop/alt 等超出子集者退回純文字編輯。
   - mermaid / React Flow 皆 lazy-load,不進主 bundle。
 - **連結內部導航**(CM6 live-preview):點 markdown 連結 → 外部(他站 / mailto)新分頁;站內(相對含 `..` / 絕對 `/<repo>/<path>` / 本站完整 URL)→ 開檔(中央預覽 + 樹逐層展開反白)或資料夾(展開反白不開檔),tab 跟連結 `#tab`(explore/chat/session/cli)。URL 雙向 deep-link:`/<repo>/<file_path>#<tab>` 載入即開、開檔即同步網址。`lib/pathLink` 解析 + `porthole:navigate` 事件(App 切 repo/tab、Explore 開檔/展開)。

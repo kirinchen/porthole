@@ -52,10 +52,16 @@ const SHAPE_DELIMS: { open: string; close: string; shape: MindmapShape }[] = [
   { open: ')', close: '(', shape: 'cloud' },
 ];
 
-/** 去掉外層 "..."(若有);還原被換成 ' 的引號無法復原,故只剝引號。 */
+/**
+ * 去掉外層 "..."(若有);還原被換成 ' 的引號無法復原,故只剝引號。
+ * 全空白的引號內容(`" "`)= 序列化「空文字節點」的載體(見 quoteBody),還原成空字串。
+ */
 function unquoteText(s: string): string {
   const t = s.trim();
-  if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) return t.slice(1, -1);
+  if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
+    const inner = t.slice(1, -1);
+    return inner.trim() === '' ? '' : inner;
+  }
   return t;
 }
 
@@ -132,6 +138,18 @@ function needsQuote(text: string): boolean {
   return /[()[\]{}"]/.test(text) || /^\s|\s$/.test(text) || text === '';
 }
 
+/**
+ * 包引號的節點內容。`"` → `'`(mermaid 不吃巢狀引號)。
+ * **空文字必須補一個空白**:mermaid 的 mindmap 文法不接受空的引號內容(`a[""]` 會噴
+ * `Expecting 'NODE_DESCR', got 'NODE_DEND'`)→ 整張圖 parse 失敗、什麼都不渲染。
+ * 「新增子節點」後未命名的節點正是空文字,故一定要擋。`a[" "]` 實測可解析;
+ * 讀回時 unquoteText 把全空白內容還原成空字串,round-trip 一致。
+ */
+function quoteBody(text: string): string {
+  const body = text.replace(/"/g, "'");
+  return `"${body.trim() === '' ? ' ' : body}"`;
+}
+
 /** id 前綴正規化成合法 token(僅 \w);空則回 undefined。 */
 function safeMid(s: string | undefined): string | undefined {
   if (!s) return undefined;
@@ -157,7 +175,7 @@ function serializeNodeBody(n: MindmapNode, usedIds: Set<string>): string {
   while (usedIds.has(cand)) cand = `${id}_${i++}`;
   usedIds.add(cand);
   id = cand;
-  const body = quoted ? `"${n.text.replace(/"/g, "'")}"` : n.text;
+  const body = quoted ? quoteBody(n.text) : n.text;
   switch (shape) {
     case 'square':
       return `${id}[${body}]`;

@@ -6,11 +6,18 @@
  *   - 自訂節點:方框顯示 text(角落小字顯示 shape / icon);四邊各 source+target Handle。
  *   - double-click 節點 → 改 text / shape / icon / class;按鈕新增子節點 / 兄弟節點。
  *   - 拖把手連線 = 「改 parent」:把 target 的既有 incoming 邊換成 source→target 的新邊。
+ *     **樹的不變式:一個節點只能有一個 parent**,所以拉新線一定會換掉 target 原本那條
+ *     邊 —— 這不是掉邊。舊版換完既不提示也不重排版,新線還從畫布右側繞回來,看起來就是
+ *     「拉了新線,某條既有的邊憑空消失」(Tide #141)。故現在改 parent 後會 message 明講
+ *     「X 由 A 改掛到 B」並自動重排版,讓結果一眼看得懂。
  *   - Delete 刪選取節點 + 整個子樹;root 不可刪。
  *
  *  單 root 不變式:mindmap 只能有一個 root(無 incoming 邊的節點)。所有操作後都要
  *  恰好一個 root。改 parent 時防環(source 不可是 target 的後代)、且不可把 root 變成
  *  自己子樹的子節點(會變兩 root 或環)。存檔時若殘留多個無 parent,把多餘的掛回 root。
+ *
+ *  圖 ⇄ 模型 的純邏輯(建邊 / 改 parent / 存檔序列化)住在 `lib/mindmapGraph`,
+ *  才能用 node:test 做 round-trip 迴歸(不必起瀏覽器)。
  *
  *  本元件較重(React Flow + dagre)→ 由上層以 lazy + Suspense 載入。
  */
@@ -22,7 +29,6 @@ import {
   MiniMap,
   Handle,
   Position,
-  addEdge,
   applyNodeChanges,
   applyEdgeChanges,
   type Node,
@@ -31,6 +37,7 @@ import {
   type NodeChange,
   type EdgeChange,
   type NodeProps,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import dagre from '@dagrejs/dagre';
@@ -42,14 +49,19 @@ import {
   ApartmentOutlined,
   BranchesOutlined,
 } from '@ant-design/icons';
+import { parseMindmap, serializeMindmap, MINDMAP_SHAPE_LABELS, type MindmapShape } from '../lib/mermaidMindmap';
 import {
-  parseMindmap,
-  serializeMindmap,
-  MINDMAP_SHAPE_LABELS,
-  type MindmapShape,
-  type MindmapModel,
-  type MindmapNode,
-} from '../lib/mermaidMindmap';
+  buildHierarchyEdges,
+  buildParentMap,
+  checkReparent,
+  collectSubtree,
+  findRootId,
+  graphToModel,
+  makeHierarchyEdge,
+  modelToGraphNodes,
+  reparentEdges,
+  type MindmapNodeFields,
+} from '../lib/mindmapGraph';
 
 /** 側邊 ∈ L/R/T/B(沿用 D2Editor 的 handle 命名 s-<SIDE> / t-<SIDE>)。 */
 type Side = 'L' | 'R' | 'T' | 'B';
@@ -76,17 +88,8 @@ function sidePos(s: Side): Position {
   }
 }
 
-/** node.data 形狀:對應 MindmapNode 的可編欄位(parent 由邊表達,不存這裡)。 */
-type MindmapNodeData = {
-  text: string;
-  shape: MindmapShape;
-  icon?: string;
-  cls?: string;
-  /** mermaid id 前綴(round-trip 用)。 */
-  mid?: string;
-  /** 是否為 root(視覺加粗 / 換色;非 SSoT,SSoT 是「無 incoming 邊」)。 */
-  isRoot?: boolean;
-};
+/** node.data 形狀 = lib 的 MindmapNodeFields(parent 由邊表達,不存這裡)。 */
+type MindmapNodeData = MindmapNodeFields;
 
 /** 四邊各放 source+target Handle(任意側邊都能拖出 / 落下 = 改 parent)。 */
 function FourSideHandles({ color }: { color: string }) {
@@ -181,55 +184,6 @@ interface Props {
 
 type Snap = { nodes: Node[]; edges: Edge[] };
 
-/** 由 edges 建「child.id → parent.id」對照(每個節點至多一條 incoming 邊)。 */
-function buildParentMap(edges: Edge[]): Map<string, string> {
-  const m = new Map<string, string>();
-  for (const e of edges) m.set(e.target, e.source);
-  return m;
-}
-
-/**
- * 沿 parent 鏈判斷 a 是否為 b 的祖先(含 a===b)。byParent: childId → parentId。
- * 用於改 parent 防環(類似 D2Editor.isAncestor)。
- */
-function isAncestor(a: string, b: string, byParent: Map<string, string>): boolean {
-  let cur: string | undefined = b;
-  const seen = new Set<string>();
-  while (cur !== undefined && !seen.has(cur)) {
-    if (cur === a) return true;
-    seen.add(cur);
-    cur = byParent.get(cur);
-  }
-  return false;
-}
-
-/** 找 root:無 incoming 邊的節點 id(理論上恰一個)。 */
-function findRootId(nodes: Node[], edges: Edge[]): string | undefined {
-  const hasIncoming = new Set(edges.map((e) => e.target));
-  return nodes.find((n) => !hasIncoming.has(n.id))?.id;
-}
-
-/** 從 root 起 BFS 收集子樹所有節點 id(含 root 自身)。byParent: childId → parentId。 */
-function collectSubtree(rootId: string, edges: Edge[]): Set<string> {
-  const children = new Map<string, string[]>();
-  for (const e of edges) {
-    if (!children.has(e.source)) children.set(e.source, []);
-    children.get(e.source)!.push(e.target);
-  }
-  const out = new Set<string>([rootId]);
-  const queue = [rootId];
-  while (queue.length) {
-    const cur = queue.shift()!;
-    for (const c of children.get(cur) ?? []) {
-      if (!out.has(c)) {
-        out.add(c);
-        queue.push(c);
-      }
-    }
-  }
-  return out;
-}
-
 /** dagre 樹狀排版(LR,像心智圖);節點 + 邊都進 dagre 算座標。 */
 function layout(nodes: Node[], edges: Edge[]): Node[] {
   const g = new dagre.graphlib.Graph();
@@ -248,53 +202,26 @@ function layout(nodes: Node[], edges: Edge[]): Node[] {
   });
 }
 
-/** 建一條階層邊(無箭頭、無 label、無 markerEnd)。handle 可帶入拖出/落下的實際側邊。 */
-function makeEdge(source: string, target: string, seq: number, sh?: string | null, th?: string | null): Edge {
-  return {
-    id: `me-${source}-${target}-${seq}`,
-    source,
-    target,
-    sourceHandle: sh ?? 's-R',
-    targetHandle: th ?? 't-L',
-  };
-}
-
 export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
   const nodeTypes = useMemo(() => ({ mindmap: MindmapNodeView }), []);
 
   const init = useMemo(() => {
     const model = parseMindmap(code);
-    const rootKey = model.nodes[0]?.key;
-
-    const rfNodes: Node[] = model.nodes.map((n) => {
-      const data: MindmapNodeData = {
-        text: n.text,
-        shape: n.shape,
-        icon: n.icon,
-        cls: n.cls,
-        mid: n.mid,
-        isRoot: n.key === rootKey,
-      };
-      return {
-        id: n.key,
-        type: 'mindmap',
-        data,
-        position: { x: 0, y: 0 },
-        style: { width: NODE_W, height: NODE_H },
-      };
-    });
-
+    const rfNodes: Node[] = modelToGraphNodes(model).map((n) => ({
+      id: n.id,
+      type: 'mindmap',
+      data: n.data,
+      position: { x: 0, y: 0 },
+      style: { width: NODE_W, height: NODE_H },
+    }));
     // 階層用邊表達:對每個有 parent 的節點建一條 parent.key → child.key 邊。
-    const rfEdges: Edge[] = model.nodes
-      .filter((n) => n.parent !== undefined)
-      .map((n, i) => makeEdge(n.parent as string, n.key, i));
-
+    const rfEdges: Edge[] = buildHierarchyEdges(model);
     return { nodes: layout(rfNodes, rfEdges), edges: rfEdges };
   }, [code]);
 
   const [nodes, setNodes] = useState<Node[]>(init.nodes);
   const [edges, setEdges] = useState<Edge[]>(init.edges);
-  const [seq, setSeq] = useState(1);
+  const [seq, setSeq] = useState(1); // 新節點 id 計數(邊 id 由 target 導出,不用序號)
 
   // 雙擊編輯節點。
   const [editNode, setEditNode] = useState<{
@@ -362,9 +289,17 @@ export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
     return () => window.removeEventListener('keydown', onWinKey);
   }, []);
 
+  // React Flow 實例:重排版後要把視野重新框回全圖(節點會換 rank / 移位,
+  // 不 fitView 的話新位置可能落在可視範圍外 → 又是一種「東西不見了」的錯覺)。
+  const rfRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
+  const fitLater = useCallback(() => {
+    // 等 React 把新座標畫上去再框視野。
+    requestAnimationFrame(() => rfRef.current?.fitView({ duration: 200 }));
+  }, []);
+
   // 選取節點 id(用於「新增子 / 兄弟 / 刪除」)。
   const selectedId = useMemo(() => nodes.find((n) => n.selected)?.id, [nodes]);
-  const rootId = useMemo(() => findRootId(nodes, edges), [nodes, edges]);
+  const rootId = useMemo(() => findRootId(nodes.map((n) => n.id), edges), [nodes, edges]);
 
   /**
    * 節點刪除:Delete/Backspace 觸發。攔截 remove change,改為刪「選取節點 + 整個子樹」,
@@ -405,45 +340,51 @@ export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
     [takeSnapshot],
   );
 
+  /** dagre 重排版(預設用目前的邊)+ 重框視野。 */
+  const reLayout = useCallback(
+    (es: Edge[] = edges) => {
+      setNodes((n) => layout(n, es));
+      fitLater();
+    },
+    [edges, fitLater],
+  );
+
   /**
-   * 拖把手連線 = 改 parent:把 target 的 parent 改成 source。
-   *  - 先移除 target 既有的 incoming 邊,再加 source → target 的新邊。
-   *  - 防環:source 不可是 target 的後代(否則成環)。
-   *  - 防多 root / 環:target 不可是 root(root 被指 parent 會多一個 root 之外又無法回頭,
-   *    其實是「root 變成自己子樹的子節點」→ 兩 root 或環)→ 禁止並提示。
-   *  - 自連(source===target)禁止。
+   * 拖把手連線 = 改 parent:把 target 的 parent 改成 source(合法性檢查見 checkReparent)。
+   *  - 先移除 target 既有的 incoming 邊,再加 source → target 的新邊(reparentEdges)。
+   *  - **換掉的舊邊 = 使用者眼中「消失的既有邊」**(Tide #141)→ 一定要 message 明講
+   *    「X 由 A 改掛到 B」,並重排版讓 target 落到新 parent 底下;不然畫面上只剩一條
+   *    從畫布邊緣繞回來的新線 + 一條莫名不見的舊線,看起來就像掉邊。
    */
   const onConnect = useCallback(
     (c: Connection) => {
       if (!c.source || !c.target) return;
-      if (c.source === c.target) {
-        message.warning('不可把節點連到自己');
-        return;
-      }
-      // target 是 root → 改它的 parent 會讓 root 變成子節點(原本無 incoming),
-      // 進而產生第二個 root 或環。禁止。
-      if (c.target === rootId) {
-        message.warning('不可改 root 的 parent(mindmap 只能有一個 root)');
-        return;
-      }
-      const byParent = buildParentMap(edges);
-      // 防環:source 不可是 target 的後代(含 target 自己)。
-      if (isAncestor(c.target, c.source, byParent)) {
-        message.warning('不可把節點掛到自己的子孫底下(會形成環)');
+      const source = c.source;
+      const target = c.target;
+      const check = checkReparent(edges, source, target, rootId);
+      if (!check.ok) {
+        message.warning(check.reason);
         return;
       }
       takeSnapshot();
-      const s = seq;
-      setSeq(s + 1);
       // 先移除 target 既有 incoming 邊,再加新邊 → 維持「每節點至多一條 incoming」。
-      setEdges((es) =>
-        addEdge(makeEdge(c.source!, c.target!, s, c.sourceHandle, c.targetHandle), es.filter((e) => e.target !== c.target)),
+      const { edges: next, prevParent } = reparentEdges(edges, source, target, c.sourceHandle, c.targetHandle);
+      setEdges(next);
+      // 換掉的舊邊要明講,否則使用者只看到「既有的邊消失」(Tide #141);
+      // 同時重排版 + 重框視野,新 parent 底下的位置才對得上,不會留一條繞回畫布外的線。
+      reLayout(next);
+      const label = (id: string): string => {
+        const d = nodes.find((n) => n.id === id)?.data as MindmapNodeData | undefined;
+        return d?.text?.trim() || '(空白)';
+      };
+      message.info(
+        prevParent !== undefined
+          ? `已改 parent:「${label(target)}」由「${label(prevParent)}」改掛到「${label(source)}」底下(mindmap 是樹,一個節點只能有一個 parent)`
+          : `已改 parent:「${label(target)}」掛到「${label(source)}」底下`,
       );
     },
-    [edges, rootId, seq, takeSnapshot],
+    [edges, nodes, rootId, takeSnapshot, reLayout],
   );
-
-  const reLayout = () => setNodes((n) => layout(n, edges));
 
   /** 產生不重複的新節點 id。 */
   const newNodeId = useCallback(
@@ -472,7 +413,7 @@ export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
       ...n,
       { id, type: 'mindmap', data, position: { x: 0, y: 0 }, style: { width: NODE_W, height: NODE_H } },
     ]);
-    setEdges((es) => [...es, makeEdge(parent, id, next)]);
+    setEdges((es) => [...es, makeHierarchyEdge(parent, id)]);
   }, [selectedId, rootId, seq, newNodeId, takeSnapshot]);
 
   /** 新增兄弟(加到選取節點的 parent 之下;root 無 parent → 退化成加 child)。 */
@@ -497,7 +438,7 @@ export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
       ...n,
       { id, type: 'mindmap', data, position: { x: 0, y: 0 }, style: { width: NODE_W, height: NODE_H } },
     ]);
-    setEdges((es) => [...es, makeEdge(parent, id, next)]);
+    setEdges((es) => [...es, makeHierarchyEdge(parent, id)]);
   }, [selectedId, edges, seq, newNodeId, addChild, takeSnapshot]);
 
   /** 套用節點編輯:text / shape / icon / class。 */
@@ -520,79 +461,18 @@ export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
     setEditNode(null);
   }, [editNode, takeSnapshot]);
 
-  /**
-   * 存檔:React Flow → MindmapModel → serializeMindmap → onSave。
-   *  - 每個 node 的 parent = 其 incoming 邊的 source(無 incoming = root)。
-   *  - 維持單 root:取「第一個無 parent 者」當 root,排到最前;其餘無 parent 者(理論上
-   *    不該出現)一律掛回 root 之下,保證恰好一個 root。
-   *  - 用 BFS 從 root 走出節點順序(parent 先於 child),helps serializeMindmap 縮排正確。
-   */
-  const save = useCallback((stay = false) => {
-    const parentMap = buildParentMap(edges);
-    const idSet = new Set(nodes.map((n) => n.id));
-    // 端點不存在的邊不計入(理論上不會,刪節點已清邊)。
-    const cleanParent = new Map<string, string>();
-    for (const [child, parent] of parentMap) {
-      if (idSet.has(child) && idSet.has(parent)) cleanParent.set(child, parent);
-    }
-
-    // 無 parent 的節點(候選 root)。
-    const noParent = nodes.filter((n) => !cleanParent.has(n.id));
-    const rootNode = noParent[0] ?? nodes[0];
-    if (!rootNode) {
-      onSave(serializeMindmap({ nodes: [] }), { stay });
-      return;
-    }
-    // 多餘的無 parent 節點 → 掛回 root,保證單 root。
-    const extraRoots = new Set(noParent.slice(1).map((n) => n.id));
-
-    const effParent = (id: string): string | undefined => {
-      if (id === rootNode.id) return undefined;
-      if (extraRoots.has(id)) return rootNode.id; // 多餘 root 掛回 root
-      return cleanParent.get(id);
-    };
-
-    // BFS 從 root 走,確保 parent 先於 child(順序非強制,但 root 必為第一個無 parent 者)。
-    const children = new Map<string, string[]>();
-    for (const n of nodes) {
-      const p = effParent(n.id);
-      if (p !== undefined) {
-        if (!children.has(p)) children.set(p, []);
-        children.get(p)!.push(n.id);
-      }
-    }
-    const byId = new Map(nodes.map((n) => [n.id, n]));
-    const ordered: Node[] = [];
-    const seen = new Set<string>();
-    const queue = [rootNode.id];
-    while (queue.length) {
-      const cur = queue.shift()!;
-      if (seen.has(cur)) continue;
-      seen.add(cur);
-      const node = byId.get(cur);
-      if (node) ordered.push(node);
-      for (const c of children.get(cur) ?? []) if (!seen.has(c)) queue.push(c);
-    }
-    // 任何 BFS 沒走到的(理論上不該有)→ 補在後面,parent 補成 root。
-    for (const n of nodes) if (!seen.has(n.id)) ordered.push(n);
-
-    const mmNodes: MindmapNode[] = ordered.map((n) => {
-      const d = n.data as MindmapNodeData;
-      const p = n.id === rootNode.id ? undefined : effParent(n.id) ?? rootNode.id;
-      return {
-        key: n.id,
-        mid: d.mid,
-        text: d.text,
-        shape: d.shape,
-        icon: d.icon?.trim() || undefined,
-        cls: d.cls?.trim() || undefined,
-        parent: p,
-      };
-    });
-
-    const model: MindmapModel = { nodes: mmNodes };
-    onSave(serializeMindmap(model), { stay });
-  }, [nodes, edges, onSave]);
+  /** 存檔:React Flow → MindmapModel(graphToModel)→ serializeMindmap → onSave。 */
+  const save = useCallback(
+    (stay = false) => {
+      // 畫布 → 模型 → mindmap 文字(單 root 收斂 / BFS 排序在 lib,見 graphToModel)。
+      const model = graphToModel(
+        nodes.map((n) => ({ id: n.id, data: n.data as MindmapNodeData })),
+        edges,
+      );
+      onSave(serializeMindmap(model), { stay });
+    },
+    [nodes, edges, onSave],
+  );
   saveRef.current = save; // 每次 render 更新,供 Ctrl+S 取最新
 
   return (
@@ -668,6 +548,7 @@ export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
             });
           }}
           nodeTypes={nodeTypes}
+          onInit={(inst) => (rfRef.current = inst)}
           deleteKeyCode={['Delete', 'Backspace']}
           fitView
         >
