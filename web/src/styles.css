@@ -202,6 +202,22 @@ body {
   background: #f0f7ff;
 }
 
+/* 搜尋結果的檔名列:可點(= 開檔並回檔案樹),故比照命中列給 hover / pointer */
+.ph-search-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ph-search-file:hover {
+  background: #f0f7ff;
+}
+
 /* 表格 cell 失焦時「縮起的連結」:overlay 本體 pointer-events:none,唯 <a> 可 hover/點 */
 .ph-cell-link {
   pointer-events: auto;

@@ -456,6 +456,7 @@ interface ExploreCtx {
   searchRan: boolean;
   runSearch: () => void;
   openHit: (path: string, line: number) => void; // 點搜尋結果 → 開檔並(md)跳到該行
+  openSearchFile: (path: string) => void; // 點搜尋結果的檔名列 → 開檔並回到檔案樹(該檔已反白)
   onLoadData: (node: TreeDataNode) => Promise<void>;
   onSelect: (keys: React.Key[], info: { node: TreeDataNode }) => void;
   refresh: () => void;
@@ -953,6 +954,17 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       await navigateTo(p, undefined, true);
       editInitialLineRef.current = Math.max(0, line - 1);
       setEditing(true);
+    },
+    [navigateTo],
+  );
+
+  // 點搜尋結果的「檔名列」→ 開檔預覽(不跳行不進編輯)並退出搜尋面板回檔案樹。
+  // 搜尋面板與檔案樹共用左側同一格,不退出就看不到樹;navigateTo 內已 revealAncestors +
+  // setSelectedKeys → 回到樹時該檔的祖先目錄已展開、檔案已反白。
+  const openSearchFile = useCallback(
+    async (p: string) => {
+      await navigateTo(p, undefined, true);
+      setSearchMode(false);
     },
     [navigateTo],
   );
@@ -1493,6 +1505,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     searchRan,
     runSearch: () => void runSearch(),
     openHit: (p: string, line: number) => void openHit(p, line),
+    openSearchFile: (p: string) => void openSearchFile(p),
     onLoadData,
     onSelect,
     refresh,
@@ -1592,16 +1605,9 @@ function SearchPanel() {
           c.searchResults.map((f) => (
             <div key={f.path} style={{ marginBottom: 6 }} data-loc="explore:search:file">
               <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  padding: '2px 0',
-                  color: '#333',
-                }}
-                title={f.path}
+                className="ph-search-file"
+                onClick={() => c.openSearchFile(f.path)}
+                title={`${f.path}(點檔名開檔並回到檔案樹)`}
               >
                 <FileOutlined style={{ color: '#888', flexShrink: 0 }} />
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.path}</span>
