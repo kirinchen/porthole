@@ -31,6 +31,45 @@ body {
   background: none;
   padding: 0;
 }
+/* fenced code 的複製鈕(CodeBlock):平常淡出,hover 程式碼區塊 / 聚焦(鍵盤)才明顯。
+   鈕在 wrapper 上、<pre> 外 → 程式碼橫向捲動時不會跟著捲走。 */
+.md-codewrap {
+  position: relative;
+}
+.md-code-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+  color: #666;
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.md-codewrap:hover .md-code-copy,
+.md-code-copy:focus-visible {
+  opacity: 1;
+}
+.md-code-copy:hover {
+  color: #1677ff;
+  border-color: #1677ff;
+}
+/* 觸控裝置沒有 hover → 常駐顯示(半透明,不擋讀) */
+@media (hover: none) {
+  .md-code-copy {
+    opacity: 0.55;
+  }
+}
 /* fenced code 語法高亮(CodeBlock + highlightTree 產 tok-* class,色值仿 CM6 defaultHighlightStyle) */
 .md-preview .tok-keyword,
 .md-preview .tok-controlKeyword,
