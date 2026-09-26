@@ -1934,6 +1934,18 @@ export function ExplorePreview() {
             />
           )}
           <TabStrip />
+          {/* 資料夾檢視:中央也給「新增檔案」入口 —— 左側樹的新增鈕在空資料夾時離得遠
+              (尤其手機收起樹),而 baseDir 已是這個資料夾,開的是同一個 Modal。 */}
+          {c.folderView && !c.editing && (
+            <Button
+              icon={<FileAddOutlined />}
+              onClick={() => c.setNewOpen(true)}
+              title={`在 ${c.folderView.path} 下新增檔案`}
+              data-loc="explore:folder:file:new"
+            >
+              新增
+            </Button>
+          )}
           {c.sel?.markdown && !c.editing && (
             <Outline text={c.sel.content} onJump={jumpHeading} />
           )}
