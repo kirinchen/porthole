@@ -31,6 +31,8 @@ export default function Chat({ repo, isActive }: Props) {
   const [listOpen, setListOpen] = useState(false); // 頂部 List 選單(thread 列表)
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameVal, setRenameVal] = useState('');
+  // active thread 的顯示標題(檔首 H1,可中文);null = 該檔沒標題 → 顯示檔名。
+  const [activeTitle, setActiveTitle] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef(true);
   useEffect(() => {
@@ -52,11 +54,15 @@ export default function Chat({ repo, isActive }: Props) {
       return;
     }
     try {
-      const { name } = await api.renameThread(repo, active, to);
+      // 後端:標題寫進檔首 H1;檔名只在輸入含英數時才改(純中文 → 檔名不動)。
+      const { name, title } = await api.renameThread(repo, active, to);
       setActive(name);
+      setActiveTitle(title ?? null);
       loadThreads();
     } catch {
+      // 無檔(空 thread)→ 本地改名,下次訊息才寫檔;此時檔名仍需收斂成安全字元。
       setActive(to.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64) || 'default');
+      setActiveTitle(null);
     }
     setRenameOpen(false);
   };
@@ -65,12 +71,14 @@ export default function Chat({ repo, isActive }: Props) {
     setThreads([]);
     setTurns([]);
     setActive('default');
+    setActiveTitle(null);
     loadThreads();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo]);
 
   const openThread = async (name: string) => {
     setActive(name);
+    setActiveTitle(threads.find((t) => t.name === name)?.title ?? null);
     setErr(null);
     try {
       const r = await api.thread(repo, name);
@@ -136,8 +144,9 @@ export default function Chat({ repo, isActive }: Props) {
       // 首輪結束且 thread 仍是自動名 → 讓 agent 依主題改名
       if (firstTurn && /^thread-\d+$/.test(active)) {
         try {
-          const { name } = await api.renameThread(repo, active);
+          const { name, title } = await api.renameThread(repo, active);
           if (name !== active) setActive(name);
+          setActiveTitle(title ?? null);
         } catch {
           /* 命名失敗不影響對話 */
         }
@@ -153,6 +162,7 @@ export default function Chat({ repo, isActive }: Props) {
   const newThread = () => {
     const name = `thread-${Date.now()}`;
     setActive(name);
+    setActiveTitle(null);
     setTurns([]);
     setListOpen(false);
   };
@@ -179,7 +189,9 @@ export default function Chat({ repo, isActive }: Props) {
               borderRadius: 4,
             }}
           >
-            <Typography.Text ellipsis>{t.name}</Typography.Text>
+            <Typography.Text ellipsis title={t.name}>
+              {t.title || t.name}
+            </Typography.Text>
           </List.Item>
         )}
       />
@@ -209,15 +221,15 @@ export default function Chat({ repo, isActive }: Props) {
             List
           </Button>
         </Popover>
-        <Typography.Text ellipsis style={{ flex: 1, minWidth: 0 }}>
-          {active}
+        <Typography.Text ellipsis style={{ flex: 1, minWidth: 0 }} title={active}>
+          {activeTitle || active}
         </Typography.Text>
         <Button
           size="small"
           icon={<EditOutlined />}
           title="重新命名此 thread"
           onClick={() => {
-            setRenameVal(active);
+            setRenameVal(activeTitle || active);
             setRenameOpen(true);
           }}
           data-loc="chat:rename"
@@ -233,12 +245,17 @@ export default function Chat({ repo, isActive }: Props) {
         cancelText="取消"
         okButtonProps={{ disabled: !renameVal.trim() }}
       >
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+          這裡改的是<Typography.Text strong>顯示標題</Typography.Text>(可用中文),寫進 <Typography.Text code>doc/chat/{active}.md</Typography.Text>{' '}
+          的第一行 <Typography.Text code># 標題</Typography.Text>。輸入含英文字母 / 數字時,檔名也會一起改成
+          對應 slug;純中文則只改標題、檔名不動。
+        </Typography.Paragraph>
         <Input
           autoFocus
           value={renameVal}
           onChange={(e) => setRenameVal(e.target.value)}
           onPressEnter={doRename}
-          placeholder="thread 名稱(僅 A-Z a-z 0-9 _ -)"
+          placeholder="顯示標題(可中文)"
           data-loc="chat:rename:input"
         />
       </Modal>

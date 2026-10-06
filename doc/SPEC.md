@@ -131,8 +131,9 @@ Chat / Session / CLI,**保活不卸載**(切走不斷 session 終端 WS)。中�
 - 子程序:`claude -p "<prompt>"`,CWD = active repo root,stdout 以 **SSE** 串回前端逐字顯示。
 - **對話記憶**:`claude -p` 每次是 stateless 一次性呼叫,故送出前把該 thread 先前的對話紀錄(turn markdown)當 context 接在最新訊息前一起餵入(尾端取最近 ~120KB),agent 才有上下文。
 - **紀錄持久化**:每個 thread 寫成一個 markdown 檔到 `<repo>/doc/chat/<thread>.md`(human + assistant 輪流,append)。
-- **首輪自動命名**:新 thread 預設 `thread-<ts>`;第一輪回覆完成後,後端 `POST .../threads/:thread/rename` 用 `claude -p` 分析對話主題產生英文 kebab-case slug,在 `doc/chat/` 內 `fs.rename`(path-guard + 衝突加 `-N`)。生不出或同名則維持原名。
-- **手動改名**:topbar 改名鈕(`chat:rename`)→ 同 rename 端點帶 `{to}`(safeThread 收斂)`fs.rename`;空 thread(尚無檔)則本地改名,下次訊息寫新檔。
+- **檔名 vs 顯示標題**(`lib/chat-title`):**檔名一律英數 / `_` / `-`**(自動命名為 kebab-case slug;跨工具 / git / URL 都安全),中文放在檔案**第一行 `# 標題`**。`GET .../chat/threads` 每筆附 `title`(= 檔首第一個 H1,只讀前 4KB;遇 `## ` turn 標頭即停,故內文的 `# ` 不算),Chat 列表(`chat:list`)與 topbar 顯示 `title || name`、`title` 屬性仍給檔名。舊檔沒有 H1 → `title: null` → 退回顯示檔名。**標題存在檔案裡**才會跟著檔案走(搬移 / clone / 在 Explore 看都還在),不必另存 index 去 drift。
+- **首輪自動命名**:新 thread 預設 `thread-<ts>`;第一輪回覆完成後,後端 `POST .../threads/:thread/rename` 用**一次** `claude -p` 同時要到「繁中標題 + 英文 slug」(兩行輸出,`parseGenTitle` 解析),標題寫進檔首 H1(`setH1`:已有則取代該行,不會變兩個 H1)、slug 經 `fs.rename`(path-guard + 衝突加 `-N`)。生不出或同名則維持原名。
+- **手動改名**:topbar 改名鈕(`chat:rename`)→ 同 rename 端點帶 `{to}`。`{to}` 即**顯示標題**(可中文),一律寫入檔首 H1;**檔名只在 `{to}` 含英數時才跟著改**(`safeThread` 收斂)—— 純中文 `slugify` 後是空的,硬改會把檔名洗成一串 `_`,故檔名維持原樣。空 thread(尚無檔)則本地改名,下次訊息寫新檔。
 - 取代 `claude-workbench/plugins/chat`(該方案太難用,porthole 不沿用其機制)。
 - thread 列表:讀 `<repo>/doc/chat/*.md`。
 - agent 回覆中的 ```mermaid 區塊同樣渲染成圖(共用 Explore 的 Markdown 元件;Chat 僅呈現,不提供 GUI 編輯)。
@@ -223,9 +224,12 @@ porthole/
 
 ### 9.3 Chat thread 檔名與格式
 
-- 檔名:`<repo>/doc/chat/<thread>.md`;`<thread>` 收斂為 `[A-Za-z0-9_-]`(≤64 字),空則 `default`,
-  再經 path-guard 二次把關(寫入面只允許 `doc/chat/`)。
-- 格式:human / assistant 輪流 append,每段 `## 🧑 Human · <ISO>` / `## 🤖 Assistant · <ISO>` 標頭 + 內容。
+- 檔名:`<repo>/doc/chat/<thread>.md`;`<thread>` 收斂為 `[A-Za-z0-9_-]`(≤64 字,`safeThread`;
+  自動命名另經 `slugify` → kebab-case),空則 `default`,再經 path-guard 二次把關(寫入面只允許
+  `doc/chat/`)。**不收中文檔名**(跨工具 / URL 風險),中文走檔首 H1 顯示標題。
+- 格式:檔首可有一行 `# <顯示標題>`(可中文,`lib/chat-title` 讀寫),之後 human / assistant 輪流
+  append,每段 `## 🧑 Human · <ISO>` / `## 🤖 Assistant · <ISO>` 標頭 + 內容。舊檔無 H1 亦合法
+  (列表 `title: null` → 顯示檔名)。前端 `parseThread` 以 `## 🧑/🤖` 切 turn,檔首 H1 自然被略過。
 
 ---
 

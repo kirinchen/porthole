@@ -31,6 +31,8 @@ export interface ClaudeSession {
 export interface ThreadMeta {
   name: string;
   mtime: number;
+  /** 顯示標題 = 檔首 H1(可中文);舊檔沒有 → null,顯示時退回 name。 */
+  title?: string | null;
 }
 
 async function jget<T>(url: string): Promise<T> {
@@ -128,7 +130,8 @@ export const api = {
   thread: (repo: string, name: string) =>
     jget<{ content: string }>(`/api/${repo}/chat/threads/${encodeURIComponent(name)}`),
 
-  /** to 有給 → 手動改名;否則 claude 依主題自動命名。回傳實際採用的名稱(可能加 -2 防衝突)。 */
+  /** to 有給 → 手動改名;否則 claude 依主題自動命名(中文標題 + 英文 slug)。
+   *  回傳實際採用的檔名(可能加 -2 防衝突)與顯示標題;純中文輸入只改標題、檔名不動。 */
   renameThread: async (repo: string, name: string, to?: string) => {
     const r = await fetch(`/api/${repo}/chat/threads/${encodeURIComponent(name)}/rename`, {
       method: 'POST',
@@ -136,7 +139,7 @@ export const api = {
       body: to ? JSON.stringify({ to }) : undefined,
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return (await r.json()) as { name: string };
+    return (await r.json()) as { name: string; title?: string | null };
   },
 
   sessions: (repo: string) => jget<{ sessions: ClaudeSession[] }>(`/api/${repo}/sessions`),

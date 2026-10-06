@@ -5,7 +5,12 @@
  * GET  /api/:repo/chat/threads/:thread  讀某 thread
  *
  * 寫入面收斂(SPEC §2):Chat 只寫 <repo>/doc/chat/,經 path-guard。
- * 紀錄格式:human / assistant 輪流 append markdown。
+ * 紀錄格式:檔首一行 H1 = **顯示標題**(可中文),之後 human / assistant 輪流 append markdown。
+ *
+ * 檔名 vs 標題:**檔名一律英文 kebab-case slug**(跨工具 / git / URL 都安全),
+ * 想看的中文放在檔案第一行 `# 標題` —— 顯示名跟著檔案走(搬移 / clone / 在 Explore
+ * 看都還在),不必另存一份 index 去 drift。列表回傳的 title 即此 H1;舊檔沒有 H1
+ * (porthole 早期只 append turn)→ title 為 null,前端退回顯示檔名。
  */
 import type { FastifyInstance } from 'fastify';
 import fs from 'node:fs/promises';
@@ -13,43 +18,32 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { guard } from '../lib/path-guard.ts';
 import { runClaude } from '../lib/claude-p.ts';
+import { safeThread, slugify, readH1, setH1, parseGenTitle } from '../lib/chat-title.ts';
 
 const CHAT_DIR = 'doc/chat';
-
-/** thread 名收斂成安全檔名(再交 path-guard 二次把關)。 */
-function safeThread(name: string): string {
-  const s = String(name).replace(/[^A-Za-z0-9_\-]/g, '_').slice(0, 64);
-  return s || 'default';
-}
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-/** claude 產出的主題 → kebab-case slug(只留小寫英數 + 連字號)。 */
-function slugify(raw: string): string {
-  const line = raw.split('\n').map((s) => s.trim()).find(Boolean) ?? '';
-  return line
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48)
-    .replace(/-+$/g, '');
-}
-
-/** 用 claude -p 分析對話開頭,產生英文 kebab-case 主題 slug。 */
-function genTitle(content: string, cwd: string): Promise<string> {
+/**
+ * 用 claude -p 分析對話開頭,一次要到兩樣:**中文顯示標題** + **英文 kebab-case slug**。
+ * 一次呼叫拿兩個(而非兩次 claude -p)—— 省一趟子程序,且標題與 slug 出自同一次理解。
+ * 回傳 `{ title, slug }`;解析不出 slug 時 slug 為空字串(呼叫端據此維持原檔名)。
+ */
+function genTitle(content: string, cwd: string): Promise<{ title: string; slug: string }> {
   const excerpt = content.slice(0, 1500);
   const prompt =
-    '根據下面這段對話的開頭,產生一個能代表主題的檔名 slug:' +
-    '3-6 個英文單字、全小寫、用連字號連接(kebab-case),' +
-    '只輸出 slug 本身,不要引號、說明或副檔名。\n\n' +
+    '根據下面這段對話的開頭,輸出剛好兩行,不要任何其他文字:\n' +
+    '第一行:能代表主題的**繁體中文**標題(10-20 字,不要引號、不要句號)。\n' +
+    '第二行:對應的英文檔名 slug(3-6 個英文單字、全小寫、連字號連接 kebab-case,' +
+    '不要引號或副檔名)。\n\n' +
     excerpt;
   return new Promise((resolve) => {
     let out = '';
     const run = runClaude(prompt, cwd);
     run.onChunk((t) => (out += t));
-    run.onEnd(() => resolve(out));
+    run.onEnd(() => resolve(parseGenTitle(out)));
   });
 }
 
@@ -91,8 +85,23 @@ export default async function chatRoutes(app: FastifyInstance) {
     const threads = [];
     for (const n of names) {
       if (!n.endsWith('.md')) continue;
-      const st = await fs.stat(path.join(dir, n));
-      threads.push({ name: n.slice(0, -3), mtime: st.mtimeMs });
+      const file = path.join(dir, n);
+      const st = await fs.stat(file);
+      // 顯示標題 = 檔首 H1。只讀前 4KB(列表可能幾十個檔,不為一行標題整檔讀進來)。
+      let title: string | null = null;
+      try {
+        const fh = await fs.open(file, 'r');
+        try {
+          const buf = Buffer.alloc(4096);
+          const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+          title = readH1(buf.subarray(0, bytesRead).toString('utf8'));
+        } finally {
+          await fh.close();
+        }
+      } catch {
+        /* 讀不到標題 → null,前端退回顯示檔名 */
+      }
+      threads.push({ name: n.slice(0, -3), mtime: st.mtimeMs, title });
     }
     threads.sort((a, b) => b.mtime - a.mtime);
     return { threads };
@@ -128,18 +137,32 @@ export default async function chatRoutes(app: FastifyInstance) {
       }
 
       const manual = (req.body?.to ?? '').trim();
-      const base = manual ? safeThread(manual) : slugify(await genTitle(content, guard.repoRoot(repo)));
-      if (!base) return { name: oldName }; // 給不出名字就維持原名
+      // 自動:claude 一次給中文標題 + 英文 slug。
+      // 手動:使用者輸入即標題(可中文);**檔名只在輸入含英數時才跟著改** ——
+      // 純中文輸入 slug 化後是空的,硬改會把檔名洗成一串 `_`,故檔名維持原樣。
+      const auto = manual ? null : await genTitle(content, guard.repoRoot(repo));
+      const title = manual || auto?.title || '';
+      const base = manual ? (slugify(manual) ? safeThread(manual) : '') : (auto?.slug ?? '');
+
+      // 標題寫進檔首 H1(先寫,檔名改不改都要有標題)。
+      if (title) {
+        const next = setH1(content, title);
+        if (next !== content) {
+          await fs.writeFile(oldFile, next, 'utf8');
+          content = next;
+        }
+      }
+      if (!base) return { name: oldName, title: title || readH1(content) }; // 只改標題,檔名不動
 
       // 命名衝突 → 加 -2/-3…;與原名相同則免改。
       let name = base;
       for (let i = 2; ; i++) {
         const candidate = safeThread(name);
-        if (candidate === oldName) return { name: oldName };
+        if (candidate === oldName) return { name: oldName, title: title || readH1(content) };
         const target = guard.resolveInRepo(repo, `${CHAT_DIR}/${candidate}.md`);
         if (!existsSync(target)) {
           await fs.rename(oldFile, target);
-          return { name: candidate };
+          return { name: candidate, title: title || readH1(content) };
         }
         name = `${base}-${i}`;
       }
