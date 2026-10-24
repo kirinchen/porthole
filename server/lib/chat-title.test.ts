@@ -54,6 +54,11 @@ test('slugify:英文 / 英數混排 → kebab-case', () => {
   assert.equal(slugify('  Linode proxy 中轉 2 '), 'linode-proxy-2');
 });
 
+test('slugify:中英混排 → 只留英數段,中文不會變成一串 _(手動改名的檔名來源)', () => {
+  assert.equal(slugify('3090 24G 價格走勢'), '3090-24g'); // 不是 safeThread 的 3090_24G_____
+  assert.equal(slugify('Linode 中轉 proxy'), 'linode-proxy');
+});
+
 test('parseGenTitle:兩行輸出 → 中文標題 + 英文 slug', () => {
   const r = parseGenTitle('OAuth redirect URL 的區網解法\noauth-redirect-url-lan-proxy\n');
   assert.equal(r.title, 'OAuth redirect URL 的區網解法');

@@ -138,11 +138,12 @@ export default async function chatRoutes(app: FastifyInstance) {
 
       const manual = (req.body?.to ?? '').trim();
       // 自動:claude 一次給中文標題 + 英文 slug。
-      // 手動:使用者輸入即標題(可中文);**檔名只在輸入含英數時才跟著改** ——
-      // 純中文輸入 slug 化後是空的,硬改會把檔名洗成一串 `_`,故檔名維持原樣。
+      // 手動:使用者輸入即標題(可中文);檔名取 `slugify` 的結果(與自動命名同一套 kebab-case)
+      // —— 中英混排如「3090 24G 價格走勢」會得到 `3090-24g`,而不是 `safeThread` 把中文逐字
+      // 換成底線的 `3090_24G_____`。slug 為空(純中文)→ 檔名維持原樣,只改標題。
       const auto = manual ? null : await genTitle(content, guard.repoRoot(repo));
       const title = manual || auto?.title || '';
-      const base = manual ? (slugify(manual) ? safeThread(manual) : '') : (auto?.slug ?? '');
+      const base = manual ? slugify(manual) : (auto?.slug ?? '');
 
       // 標題寫進檔首 H1(先寫,檔名改不改都要有標題)。
       if (title) {

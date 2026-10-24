@@ -135,7 +135,7 @@ Chat / Session / CLI,**保活不卸載**(切走不斷 session 終端 WS)。中�
 - **紀錄持久化**:每個 thread 寫成一個 markdown 檔到 `<repo>/doc/chat/<thread>.md`(human + assistant 輪流,append)。
 - **檔名 vs 顯示標題**(`lib/chat-title`):**檔名一律英數 / `_` / `-`**(自動命名為 kebab-case slug;跨工具 / git / URL 都安全),中文放在檔案**第一行 `# 標題`**。`GET .../chat/threads` 每筆附 `title`(= 檔首第一個 H1,只讀前 4KB;遇 `## ` turn 標頭即停,故內文的 `# ` 不算),Chat 列表(`chat:list`)與 topbar 顯示 `title || name`、`title` 屬性仍給檔名。舊檔沒有 H1 → `title: null` → 退回顯示檔名。**標題存在檔案裡**才會跟著檔案走(搬移 / clone / 在 Explore 看都還在),不必另存 index 去 drift。
 - **首輪自動命名**:新 thread 預設 `thread-<ts>`;第一輪回覆完成後,後端 `POST .../threads/:thread/rename` 用**一次** `claude -p` 同時要到「繁中標題 + 英文 slug」(兩行輸出,`parseGenTitle` 解析),標題寫進檔首 H1(`setH1`:已有則取代該行,不會變兩個 H1)、slug 經 `fs.rename`(path-guard + 衝突加 `-N`)。生不出或同名則維持原名。
-- **手動改名**:topbar 改名鈕(`chat:rename`)→ 同 rename 端點帶 `{to}`。`{to}` 即**顯示標題**(可中文),一律寫入檔首 H1;**檔名只在 `{to}` 含英數時才跟著改**(`safeThread` 收斂)—— 純中文 `slugify` 後是空的,硬改會把檔名洗成一串 `_`,故檔名維持原樣。空 thread(尚無檔)則本地改名,下次訊息寫新檔。
+- **手動改名**:topbar 改名鈕(`chat:rename`)→ 同 rename 端點帶 `{to}`。`{to}` 即**顯示標題**(可中文),一律寫入檔首 H1;**檔名取 `slugify({to})`**(與自動命名同一套 kebab-case:「3090 24G 價格走勢」→ `3090-24g`,而非 `safeThread` 逐字換底線的 `3090_24G_____`);slug 為空(純中文)→ 檔名維持原樣,只改標題。空 thread(尚無檔)則本地改名,下次訊息寫新檔。
 - 取代 `claude-workbench/plugins/chat`(該方案太難用,porthole 不沿用其機制)。
 - thread 列表:讀 `<repo>/doc/chat/*.md`。
 - agent 回覆中的 ```mermaid 區塊同樣渲染成圖(共用 Explore 的 Markdown 元件;Chat 僅呈現,不提供 GUI 編輯)。

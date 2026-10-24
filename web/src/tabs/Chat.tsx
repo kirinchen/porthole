@@ -38,14 +38,25 @@ function threadFromUrl(): string | null {
   return t ? t.trim() || null : null;
 }
 
-/** active thread → URL `?thread=`(replaceState,不灌歷史;default 則移除參數)。 */
-function writeThreadUrl(name: string): void {
+/** URL 第一段 = repo(與 App 的 repoFromUrl 同規則);popstate 要據此判斷是否同 repo。 */
+function repoFromUrl(): string {
+  return decodeURIComponent(location.pathname.split('/').filter(Boolean)[0] ?? '');
+}
+
+/**
+ * active thread → URL `?thread=`(`default` 則移除參數)。
+ * push=true(使用者切 thread / 開新對話)→ 留歷史一筆,上一頁可回前一個 thread;
+ * push=false(改名、初次同步)→ replaceState,同一個 thread 換個名字不該多一筆歷史。
+ */
+function writeThreadUrl(name: string, push = false): void {
   const params = new URLSearchParams(location.search);
   if (name && name !== 'default') params.set('thread', name);
   else params.delete('thread');
   const qs = params.toString();
   const url = `${location.pathname}${qs ? `?${qs}` : ''}${location.hash}`;
-  if (url !== location.pathname + location.search + location.hash) history.replaceState(null, '', url);
+  if (url === location.pathname + location.search + location.hash) return;
+  if (push) history.pushState(null, '', url);
+  else history.replaceState(null, '', url);
 }
 
 export default function Chat({ repo, isActive }: Props) {
@@ -115,12 +126,36 @@ export default function Chat({ repo, isActive }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo]);
 
-  // active → URL(reload / 切 tab 回來都還在同一個 thread)
+  // active → URL 的保底同步(改名 / 自動命名 / 初次掛載):replaceState,不灌歷史。
+  // 使用者主動切 thread 的那一筆歷史由 openThread(push) / newThread 負責。
   useEffect(() => {
     writeThreadUrl(active);
   }, [active]);
 
-  const openThread = async (name: string) => {
+  /**
+   * URL → state(上一頁 / 下一頁)。只在 URL 的 repo 與目前 repo 相同時才接手 ——
+   * 跨 repo 的 popstate 由 App 切 repo,接著 Chat 的 repo effect 會重置狀態。
+   * 比對 activeRef 式的最新值用 ref,避免 handler 綁到過期的 active。
+   */
+  const activeThreadRef = useRef(active);
+  useEffect(() => {
+    activeThreadRef.current = active;
+  }, [active]);
+  useEffect(() => {
+    const onPop = () => {
+      if (repoFromUrl() !== repo) return; // 換 repo → 交給 repo effect
+      const want = threadFromUrl() ?? 'default';
+      if (want === activeThreadRef.current) return;
+      void openThread(want);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo]);
+
+  /** 開某 thread。push=true(使用者從列表點選)→ 在歷史留一筆,上一頁可回前一個 thread。 */
+  const openThread = async (name: string, push = false) => {
+    if (push) writeThreadUrl(name, true);
     setActive(name);
     setActiveTitle(threads.find((t) => t.name === name)?.title ?? null);
     setErr(null);
@@ -246,6 +281,7 @@ export default function Chat({ repo, isActive }: Props) {
 
   const newThread = () => {
     const name = `thread-${Date.now()}`;
+    writeThreadUrl(name, true); // 開新對話也留一筆歷史
     setActive(name);
     setActiveTitle(null);
     setTurns([]);
@@ -265,7 +301,7 @@ export default function Chat({ repo, isActive }: Props) {
         renderItem={(t) => (
           <List.Item
             onClick={() => {
-              void openThread(t.name);
+              void openThread(t.name, true); // 使用者主動切 → 留歷史,上一頁可回上一個 thread
               setListOpen(false);
             }}
             style={{
