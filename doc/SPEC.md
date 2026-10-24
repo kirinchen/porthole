@@ -129,6 +129,8 @@ Chat / Session / CLI,**保活不卸載**(切走不斷 session 終端 WS)。中�
 ### 4.2 Chat
 - 透過 `claude -p` 跟 active repo 的 agent 對話(coral → coral 前台助理)。
 - 子程序:`claude -p "<prompt>"`,CWD = active repo root,stdout 以 **SSE** 串回前端逐字顯示。
+- **active thread 存進 URL**(`?thread=<name>`,`replaceState` 不灌歷史;`default` 不寫參數):reload / 切 tab 回來都還在同一個 thread,也可直接把連結分享成 deep-link。換 repo 時由 App 重寫 pathname 自然清掉。Explore 的 `writeUrl` 會**保留** `thread`(同 `?sec` / `?edit=1`)—— 不留著的話在 Explore 開個檔就把 Chat 的 thread 從網址抹掉。
+- **重整後仍在跑的那輪**(`chat:pending`):SSE 連線隨 reload 斷掉,但後端那趟 `claude -p` 還在跑、跑完照樣 append 到 `doc/chat/<thread>.md`(實測 16:01 送出 → 16:03 reload → 16:05 才寫完)。故開啟 thread 時若**檔尾是 Human turn 沒有 Assistant** → 視為「該輪仍在執行」,顯示提示(含「立即重讀」鈕)並每 5 秒輪詢該檔(上限 60 次 = 5 分鐘),assistant turn 一出現就自動補進畫面並停止輪詢。送出新訊息 / 開新 thread 會清掉此狀態(改由 SSE 接管)。**重新 attach 串流**(看逐字輸出)需後端記 in-flight run,未實作。
 - **對話記憶**:`claude -p` 每次是 stateless 一次性呼叫,故送出前把該 thread 先前的對話紀錄(turn markdown)當 context 接在最新訊息前一起餵入(尾端取最近 ~120KB),agent 才有上下文。
 - **紀錄持久化**:每個 thread 寫成一個 markdown 檔到 `<repo>/doc/chat/<thread>.md`(human + assistant 輪流,append)。
 - **檔名 vs 顯示標題**(`lib/chat-title`):**檔名一律英數 / `_` / `-`**(自動命名為 kebab-case slug;跨工具 / git / URL 都安全),中文放在檔案**第一行 `# 標題`**。`GET .../chat/threads` 每筆附 `title`(= 檔首第一個 H1,只讀前 4KB;遇 `## ` turn 標頭即停,故內文的 `# ` 不算),Chat 列表(`chat:list`)與 topbar 顯示 `title || name`、`title` 屬性仍給檔名。舊檔沒有 H1 → `title: null` → 退回顯示檔名。**標題存在檔案裡**才會跟著檔案走(搬移 / clone / 在 Explore 看都還在),不必另存 index 去 drift。

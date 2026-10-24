@@ -677,9 +677,13 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       const t = tab && TABS.includes(tab) ? tab : location.hash.replace(/^#/, '') || 'explore';
       const enc = path.split('/').map(encodeURIComponent).join('/');
       // 一併帶 ?edit=1(編輯中)+ ?sec —— 否則導航重建 URL 會蓋掉 ?edit 效果加的值。
+      // ?thread=(Chat tab 的 active thread)也要保留:它跟檔案路徑共用這條 URL,
+      // 不留著的話在 Explore 開個檔就把 Chat 的 thread 從網址抹掉(reload 又回 default)。
       const params: string[] = [];
       if (section) params.push(`sec=${encodeURIComponent(section)}`);
       if (editingRef.current) params.push('edit=1');
+      const keepThread = new URLSearchParams(location.search).get('thread');
+      if (keepThread) params.push(`thread=${encodeURIComponent(keepThread)}`);
       const qs = params.length ? `?${params.join('&')}` : '';
       const url = `/${encodeURIComponent(repo)}/${enc}${qs}#${t}`;
       if (push && location.pathname + location.search + location.hash !== url) {

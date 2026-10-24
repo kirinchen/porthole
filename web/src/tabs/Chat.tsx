@@ -3,6 +3,13 @@
  *  - 左:thread 列表(讀 <repo>/doc/chat/*.md)
  *  - 右:對話內容 + composer
  *  - 送出 → POST /api/:repo/chat,SSE 逐字串回;後端把紀錄 append 到 doc/chat/<thread>.md
+ *
+ *  **reload 的兩個坑**(實測:16:01 送出 → 16:03 reload → 16:05 後端才寫完回覆):
+ *   1. active thread 存進 URL `?thread=`(換 repo 時由 App 重寫 pathname 自然清掉)——
+ *      否則 reload 一律回 default,使用者得自己點回剛才那個 thread。
+ *   2. SSE 連線隨 reload 斷掉,但後端那趟 `claude -p` 還在跑、跑完照樣 append 到檔案。
+ *      故重開時若**檔尾是 Human turn 沒有 Assistant** → 視為「該輪仍在執行」,顯示提示
+ *      並輪詢該檔(POLL_MS / POLL_MAX),回覆一寫進檔案就自動補上;不必使用者手動重整。
  */
 import { useEffect, useRef, useState } from 'react';
 import { Button, List, Spin, Alert, Typography, Space, Popover, Modal, Input } from 'antd';
@@ -21,9 +28,31 @@ interface Turn {
   text: string;
 }
 
+/** 等「後端仍在跑」那輪回覆的輪詢:5s 一次,最多 5 分鐘(claude -p 深度題目可跑數分鐘)。 */
+const POLL_MS = 5000;
+const POLL_MAX = 60;
+
+/** URL `?thread=` → thread 名(reload 回到同一個 thread)。 */
+function threadFromUrl(): string | null {
+  const t = new URLSearchParams(location.search).get('thread');
+  return t ? t.trim() || null : null;
+}
+
+/** active thread → URL `?thread=`(replaceState,不灌歷史;default 則移除參數)。 */
+function writeThreadUrl(name: string): void {
+  const params = new URLSearchParams(location.search);
+  if (name && name !== 'default') params.set('thread', name);
+  else params.delete('thread');
+  const qs = params.toString();
+  const url = `${location.pathname}${qs ? `?${qs}` : ''}${location.hash}`;
+  if (url !== location.pathname + location.search + location.hash) history.replaceState(null, '', url);
+}
+
 export default function Chat({ repo, isActive }: Props) {
   const [threads, setThreads] = useState<ThreadMeta[]>([]);
-  const [active, setActive] = useState<string>('default');
+  const [active, setActive] = useState<string>(() => threadFromUrl() ?? 'default');
+  // 重開後偵測到「上一輪還在後端跑」(檔尾是 Human turn,無 Assistant)→ 顯示提示 + 輪詢。
+  const [pendingReply, setPendingReply] = useState(false);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -67,14 +96,29 @@ export default function Chat({ repo, isActive }: Props) {
     setRenameOpen(false);
   };
 
+  // 換 repo → 清狀態。**初次掛載例外**:沿用 URL `?thread=` 的 thread 並把它讀出來,
+  // 否則 reload 後會被這裡重設成 default(= 使用者回報的「refresh 就沒反應」)。
+  const didInit = useRef(false);
   useEffect(() => {
     setThreads([]);
     setTurns([]);
-    setActive('default');
-    setActiveTitle(null);
+    const urlThread = didInit.current ? null : threadFromUrl();
+    didInit.current = true;
+    if (urlThread) {
+      void openThread(urlThread);
+    } else {
+      setActive('default');
+      setActiveTitle(null);
+      setPendingReply(false);
+    }
     loadThreads();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo]);
+
+  // active → URL(reload / 切 tab 回來都還在同一個 thread)
+  useEffect(() => {
+    writeThreadUrl(active);
+  }, [active]);
 
   const openThread = async (name: string) => {
     setActive(name);
@@ -82,15 +126,55 @@ export default function Chat({ repo, isActive }: Props) {
     setErr(null);
     try {
       const r = await api.thread(repo, name);
-      setTurns(parseThread(r.content));
+      const parsed = parseThread(r.content);
+      setTurns(parsed);
+      // 檔尾是 Human turn → 那輪的 assistant 還沒寫檔(後端可能仍在跑)→ 開輪詢等它。
+      setPendingReply(parsed.length > 0 && parsed[parsed.length - 1].role === 'human');
     } catch {
       setTurns([]); // 新 thread
+      setPendingReply(false);
     }
   };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [turns]);
+
+  /**
+   * 等「reload 前送出、後端仍在跑」那輪的回覆:每 POLL_MS 重讀 thread 檔,
+   * 等到 assistant turn 出現(= 後端 append 完)就停。SSE 已隨 reload 斷掉,無法重新
+   * attach(那是厚的那層),故退而輪詢檔案 —— 使用者不必自己一直按重整。
+   * 上限 POLL_MAX 次;逾時就停(留提示讓使用者自己重讀)。
+   */
+  useEffect(() => {
+    if (!pendingReply || streaming) return;
+    let tries = 0;
+    let stopped = false;
+    const timer = setInterval(() => {
+      if (stopped) return;
+      tries += 1;
+      api
+        .thread(repo, active)
+        .then((r) => {
+          const parsed = parseThread(r.content);
+          if (parsed.length && parsed[parsed.length - 1].role === 'assistant') {
+            setTurns(parsed);
+            setPendingReply(false);
+            loadThreads(); // 後端可能也在這輪之後自動命名了
+          } else if (tries >= POLL_MAX) {
+            setPendingReply(false);
+          }
+        })
+        .catch(() => {
+          if (tries >= POLL_MAX) setPendingReply(false);
+        });
+    }, POLL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingReply, streaming, repo, active]);
 
   // ContentPick 挑到的內容 → 以引用塊附進輸入框(Cursor 式 mention)。只有 active 時收。
   useEffect(() => {
@@ -115,6 +199,7 @@ export default function Chat({ repo, isActive }: Props) {
     const firstTurn = turns.length === 0; // 首輪 → 回覆後請 agent 依主題命名
     setInput('');
     setErr(null);
+    setPendingReply(false); // 這輪有自己的 SSE,輪詢交棒給 streaming
     setTurns((t) => [...t, { role: 'human', text: prompt }, { role: 'assistant', text: '' }]);
     setStreaming(true);
     try {
@@ -164,6 +249,7 @@ export default function Chat({ repo, isActive }: Props) {
     setActive(name);
     setActiveTitle(null);
     setTurns([]);
+    setPendingReply(false);
     setListOpen(false);
   };
 
@@ -263,6 +349,21 @@ export default function Chat({ repo, isActive }: Props) {
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16 }} data-loc="chat:messages">
           {err && <Alert type="error" message={err} style={{ marginBottom: 8 }} />}
+          {pendingReply && !streaming && (
+            <Alert
+              type="info"
+              showIcon
+              icon={<Spin size="small" />}
+              message="上一輪可能仍在後端執行(送出後重整過頁面)—— 回覆寫進檔案就會自動出現"
+              action={
+                <Button size="small" onClick={() => void openThread(active)} data-loc="chat:pending:reload">
+                  立即重讀
+                </Button>
+              }
+              style={{ marginBottom: 8 }}
+              data-loc="chat:pending"
+            />
+          )}
           {turns.length === 0 && (
             <Typography.Text type="secondary">
               對話寫進 {repo}/doc/chat/{active}.md
