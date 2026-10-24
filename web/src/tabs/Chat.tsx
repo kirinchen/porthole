@@ -10,6 +10,11 @@
  *   2. SSE 連線隨 reload 斷掉,但後端那趟 `claude -p` 還在跑、跑完照樣 append 到檔案。
  *      故重開時若**檔尾是 Human turn 沒有 Assistant** → 視為「該輪仍在執行」,顯示提示
  *      並輪詢該檔(POLL_MS / POLL_MAX),回覆一寫進檔案就自動補上;不必使用者手動重整。
+ *
+ *  **串流狀態是 per thread**(`streamingThreads`,非單一 boolean):在 A 送出後切到 B
+ *  還要能繼續送(送出鈕只鎖住正在串流的那個 thread),而且 A 的 delta 只有在 A 仍是
+ *  active 時才寫畫面 —— 否則切去 B 後,A 的回覆會逐字接到 B 的對話上。切走那輪不中斷
+ *  (後端照跑照寫檔),切回來由上面的輪詢補齊。
  */
 import { useEffect, useRef, useState } from 'react';
 import { Button, List, Spin, Alert, Typography, Space, Popover, Modal, Input } from 'antd';
@@ -66,7 +71,9 @@ export default function Chat({ repo, isActive }: Props) {
   const [pendingReply, setPendingReply] = useState(false);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
-  const [streaming, setStreaming] = useState(false);
+  // 正在串流的 thread 名集合(per thread —— 在 A 送出後切到 B 仍可送出)。
+  const [streamingThreads, setStreamingThreads] = useState<Set<string>>(new Set());
+  const streaming = streamingThreads.has(active); // 目前這個 thread 是否在串流
   const [err, setErr] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false); // 頂部 List 選單(thread 列表)
   const [renameOpen, setRenameOpen] = useState(false);
@@ -113,6 +120,7 @@ export default function Chat({ repo, isActive }: Props) {
   useEffect(() => {
     setThreads([]);
     setTurns([]);
+    setStreamingThreads(new Set()); // thread 名空間隨 repo 不同,避免同名誤判
     const urlThread = didInit.current ? null : threadFromUrl();
     didInit.current = true;
     if (urlThread) {
@@ -163,7 +171,9 @@ export default function Chat({ repo, isActive }: Props) {
       const r = await api.thread(repo, name);
       const parsed = parseThread(r.content);
       setTurns(parsed);
-      // 檔尾是 Human turn → 那輪的 assistant 還沒寫檔(後端可能仍在跑)→ 開輪詢等它。
+      // 檔尾是 Human turn → 那輪的 assistant 還沒寫檔(後端仍在跑:重整過、或在這個
+      // thread 送出後切走了)→ 開輪詢等它寫檔。切走那輪的逐字輸出收不回來(SSE 的
+      // delta 只在該 thread 仍 active 時才寫畫面),但整段回覆會由輪詢補上。
       setPendingReply(parsed.length > 0 && parsed[parsed.length - 1].role === 'human');
     } catch {
       setTurns([]); // 新 thread
@@ -182,7 +192,7 @@ export default function Chat({ repo, isActive }: Props) {
    * 上限 POLL_MAX 次;逾時就停(留提示讓使用者自己重讀)。
    */
   useEffect(() => {
-    if (!pendingReply || streaming) return;
+    if (!pendingReply) return; // 本畫面在串流時 send() 已把它設成 false
     let tries = 0;
     let stopped = false;
     const timer = setInterval(() => {
@@ -209,7 +219,7 @@ export default function Chat({ repo, isActive }: Props) {
       clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingReply, streaming, repo, active]);
+  }, [pendingReply, repo, active]);
 
   // ContentPick 挑到的內容 → 以引用塊附進輸入框(Cursor 式 mention)。只有 active 時收。
   useEffect(() => {
@@ -231,28 +241,31 @@ export default function Chat({ repo, isActive }: Props) {
   const send = async () => {
     const prompt = input.trim();
     if (!prompt || streaming) return;
+    const thread = active; // 這一輪綁定的 thread:送出後使用者可能切到別的 thread
     const firstTurn = turns.length === 0; // 首輪 → 回覆後請 agent 依主題命名
     setInput('');
     setErr(null);
     setPendingReply(false); // 這輪有自己的 SSE,輪詢交棒給 streaming
     setTurns((t) => [...t, { role: 'human', text: prompt }, { role: 'assistant', text: '' }]);
-    setStreaming(true);
+    setStreamingThreads((s) => new Set(s).add(thread));
     try {
       const r = await fetch(`/api/${repo}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ thread: active, prompt }),
+        body: JSON.stringify({ thread, prompt }),
       });
       if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
       await readSse(r.body, (event, data) => {
         if (event === 'delta') {
+          // 只在這輪的 thread 仍是 active 時寫畫面 —— 否則會把這個 thread 的回覆
+          // 逐字接到使用者已切過去的另一個 thread 上。切走後照收不寫,回來由輪詢補。
+          if (activeThreadRef.current !== thread) return;
           const text = (data as { text: string }).text;
           setTurns((t) => {
             const copy = [...t];
-            copy[copy.length - 1] = {
-              role: 'assistant',
-              text: copy[copy.length - 1].text + text,
-            };
+            const last = copy[copy.length - 1];
+            if (!last || last.role !== 'assistant') return t; // 畫面已換過 → 不亂接
+            copy[copy.length - 1] = { role: 'assistant', text: last.text + text };
             return copy;
           });
         } else if (event === 'stderr') {
@@ -262,20 +275,27 @@ export default function Chat({ repo, isActive }: Props) {
         }
       });
       // 首輪結束且 thread 仍是自動名 → 讓 agent 依主題改名
-      if (firstTurn && /^thread-\d+$/.test(active)) {
+      if (firstTurn && /^thread-\d+$/.test(thread)) {
         try {
-          const { name, title } = await api.renameThread(repo, active);
-          if (name !== active) setActive(name);
-          setActiveTitle(title ?? null);
+          const { name, title } = await api.renameThread(repo, thread);
+          // 使用者已切去別的 thread → 只更新列表,不把他拉回來
+          if (activeThreadRef.current === thread) {
+            if (name !== thread) setActive(name);
+            setActiveTitle(title ?? null);
+          }
         } catch {
           /* 命名失敗不影響對話 */
         }
       }
       loadThreads();
     } catch (e) {
-      setErr((e as Error).message);
+      if (activeThreadRef.current === thread) setErr((e as Error).message);
     } finally {
-      setStreaming(false);
+      setStreamingThreads((s) => {
+        const next = new Set(s);
+        next.delete(thread);
+        return next;
+      });
     }
   };
 
@@ -311,9 +331,11 @@ export default function Chat({ repo, isActive }: Props) {
               borderRadius: 4,
             }}
           >
-            <Typography.Text ellipsis title={t.name}>
+            <Typography.Text ellipsis title={t.name} style={{ flex: 1, minWidth: 0 }}>
               {t.title || t.name}
             </Typography.Text>
+            {/* 多開時標出哪個 thread 還在跑(送出後切去別的 thread 也看得到) */}
+            {streamingThreads.has(t.name) && <Spin size="small" data-loc="chat:thread:running" />}
           </List.Item>
         )}
       />
@@ -385,12 +407,12 @@ export default function Chat({ repo, isActive }: Props) {
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16 }} data-loc="chat:messages">
           {err && <Alert type="error" message={err} style={{ marginBottom: 8 }} />}
-          {pendingReply && !streaming && (
+          {pendingReply && (
             <Alert
               type="info"
               showIcon
               icon={<Spin size="small" />}
-              message="上一輪可能仍在後端執行(送出後重整過頁面)—— 回覆寫進檔案就會自動出現"
+              message="這一輪仍在後端執行(送出後重整過頁面,或切去了別的對話)—— 回覆寫進檔案就會自動出現"
               action={
                 <Button size="small" onClick={() => void openThread(active)} data-loc="chat:pending:reload">
                   立即重讀
