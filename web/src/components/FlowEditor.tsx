@@ -43,11 +43,11 @@ function ShapedNode({ data }: NodeProps) {
   const h = NODE_H;
   const shapeEl =
     shape === 'diamond' ? (
-      <polygon points={`${w / 2},1 ${w - 1},${h / 2} ${w / 2},${h - 1} 1,${h / 2}`} fill="#fff" stroke="#555" />
+      <polygon points={`${w / 2},1 ${w - 1},${h / 2} ${w / 2},${h - 1} 1,${h / 2}`} fill="var(--card)" stroke="var(--muted)" />
     ) : shape === 'round' ? (
-      <rect x="1" y="1" width={w - 2} height={h - 2} rx={h / 2} ry={h / 2} fill="#fff" stroke="#555" />
+      <rect x="1" y="1" width={w - 2} height={h - 2} rx={h / 2} ry={h / 2} fill="var(--card)" stroke="var(--muted)" />
     ) : (
-      <rect x="1" y="1" width={w - 2} height={h - 2} rx="4" fill="#fff" stroke="#555" />
+      <rect x="1" y="1" width={w - 2} height={h - 2} rx="4" fill="var(--card)" stroke="var(--muted)" />
     );
   return (
     <div style={{ position: 'relative', width: w, height: h }}>
@@ -70,8 +70,8 @@ function ShapedNode({ data }: NodeProps) {
       >
         {d.label}
       </div>
-      <Handle type="target" position={Position.Top} style={{ background: '#555' }} />
-      <Handle type="source" position={Position.Bottom} style={{ background: '#555' }} />
+      <Handle type="target" position={Position.Top} style={{ background: 'var(--muted)' }} />
+      <Handle type="source" position={Position.Bottom} style={{ background: 'var(--muted)' }} />
     </div>
   );
 }
@@ -368,7 +368,7 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
       </Space>
 
       <div
-        style={{ flex: 1, border: '1px solid #f0f0f0', borderRadius: 8, minHeight: 0, outline: 'none' }}
+        style={{ flex: 1, border: '1px solid var(--line)', borderRadius: 8, minHeight: 0, outline: 'none' }}
         tabIndex={0}
         onKeyDown={onKeyDown}
         data-loc="flow:canvas"

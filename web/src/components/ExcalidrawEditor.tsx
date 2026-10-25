@@ -88,11 +88,13 @@ export default function ExcalidrawEditor({ code, onSave, onClose, fill }: Props)
         )}
       </Space>
       <div style={{ flex: 1, minHeight: 0 }}>
+        {/* theme="dark":porthole 整體深色(SPEC §3.1)。白板內容本身存在檔裡、不受主題影響。 */}
         <Excalidraw
           excalidrawAPI={(api) => {
             apiRef.current = api;
           }}
           initialData={initialData}
+          theme="dark"
         />
       </div>
     </div>

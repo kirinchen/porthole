@@ -47,17 +47,17 @@ function StateShapedNode({ data }: NodeProps) {
         <svg width={PSEUDO} height={PSEUDO} style={{ position: 'absolute', inset: 0, display: 'block' }}>
           {kind === 'start' ? (
             // 實心黑圓(●)
-            <circle cx={r} cy={r} r={r - 1} fill="#333" stroke="#333" />
+            <circle cx={r} cy={r} r={r - 1} fill="var(--text)" stroke="var(--text)" />
           ) : (
             // 雙圈圓(◉):外圈 + 實心內圈
             <>
-              <circle cx={r} cy={r} r={r - 1} fill="#fff" stroke="#333" strokeWidth={1.5} />
-              <circle cx={r} cy={r} r={r - 5} fill="#333" stroke="#333" />
+              <circle cx={r} cy={r} r={r - 1} fill="var(--card)" stroke="var(--text)" strokeWidth={1.5} />
+              <circle cx={r} cy={r} r={r - 5} fill="var(--text)" stroke="var(--text)" />
             </>
           )}
         </svg>
-        <Handle type="target" position={Position.Top} style={{ background: '#555' }} />
-        <Handle type="source" position={Position.Bottom} style={{ background: '#555' }} />
+        <Handle type="target" position={Position.Top} style={{ background: 'var(--muted)' }} />
+        <Handle type="source" position={Position.Bottom} style={{ background: 'var(--muted)' }} />
       </div>
     );
   }
@@ -68,7 +68,7 @@ function StateShapedNode({ data }: NodeProps) {
   return (
     <div style={{ position: 'relative', width: w, height: h }}>
       <svg width={w} height={h} style={{ position: 'absolute', inset: 0, display: 'block' }}>
-        <rect x="1" y="1" width={w - 2} height={h - 2} rx="8" ry="8" fill="#fff" stroke="#555" />
+        <rect x="1" y="1" width={w - 2} height={h - 2} rx="8" ry="8" fill="var(--card)" stroke="var(--muted)" />
       </svg>
       <div
         style={{
@@ -86,8 +86,8 @@ function StateShapedNode({ data }: NodeProps) {
       >
         {d.label}
       </div>
-      <Handle type="target" position={Position.Top} style={{ background: '#555' }} />
-      <Handle type="source" position={Position.Bottom} style={{ background: '#555' }} />
+      <Handle type="target" position={Position.Top} style={{ background: 'var(--muted)' }} />
+      <Handle type="source" position={Position.Bottom} style={{ background: 'var(--muted)' }} />
     </div>
   );
 }
@@ -410,7 +410,7 @@ export default function StateEditor({ code, onSave, onClose, fill }: Props) {
       </Space>
 
       <div
-        style={{ flex: 1, border: '1px solid #f0f0f0', borderRadius: 8, minHeight: 0, outline: 'none' }}
+        style={{ flex: 1, border: '1px solid var(--line)', borderRadius: 8, minHeight: 0, outline: 'none' }}
         tabIndex={0}
         onKeyDown={onKeyDown}
         data-loc="state:canvas"

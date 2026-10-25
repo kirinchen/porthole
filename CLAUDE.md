@@ -8,7 +8,7 @@
 
 ## 這是什麼
 
-給 coral 前台助理(及各 repo)用的 web GUI。後端 node server(Fastify),前端 Vite + React SPA。仿 Claude Desktop 左側四 Tab:Explore / Chat / Session / CLI。
+給 coral 前台助理(及各 repo)用的 web GUI。後端 node server(Fastify),前端 Vite + React SPA。兩個模式:**檔案**(檔案樹 + 預覽 / 編輯 + 當前檔的對話)與**對話**(全部對話)。
 
 - 不是桌面 app(非 Tauri);僅**參考** InRay 的 UI 殼。
 - 不是通用檔案總管;一切 fs / 子程序動作被 path guard 鎖在 basePath 內。
@@ -53,7 +53,6 @@
 
 - 前端:Vite + React 19 + TypeScript strict（`no-explicit-any` 從嚴,比照 InRay)+ Antd 6
 - 後端:Fastify(單 port 4321,serve build + REST/SSE + WebSocket + path 映射)
-- 終端:`node-pty` + `xterm.js`
 - Chat 串流:spawn `claude -p` → SSE
 - Node 走 nvm 管理
 
@@ -67,8 +66,8 @@ porthole/
 ├── doc/
 │   ├── SPEC.md            # 規格 SSoT — 先讀
 │   └── Wiki/guides/       # dev-pick-locator + bda-rea-agent-split(必讀)
-├── server/                # Fastify 後端:routes(chat/session/cli/fs)+ lib(claude-p/tmux/path-guard)
-└── web/                   # Vite React 前端:tabs(Explore/Chat/Session/CLI)+ DevPick.tsx
+├── server/                # Fastify 後端:routes(fs / chat / d2)+ lib(claude-p / chat-title / path-guard)
+└── web/                   # Vite React 前端:tabs(Explore / Chat)+ theme.ts + DevPick.tsx
 ```
 
 ---

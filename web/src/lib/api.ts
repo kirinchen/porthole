@@ -22,17 +22,21 @@ export interface SearchFile {
   matches: SearchMatch[];
 }
 
-export interface ClaudeSession {
-  id: string;
-  mtime: number;
-  title: string;
-}
-
 export interface ThreadMeta {
   name: string;
   mtime: number;
   /** 顯示標題 = 檔首 H1(可中文);舊檔沒有 → null,顯示時退回 name。 */
   title?: string | null;
+  /** 綁的檔(repo 相對路徑,來自檔內 `<!-- porthole:link -->`);沒綁 → null。 */
+  link?: string | null;
+}
+
+/** 那一輪 claude -p 還在跑嗎(後端 job registry;後端重啟過 → null)。 */
+export interface ChatJob {
+  state: 'running';
+  startedAt: number;
+  model: string | null;
+  effort: string | null;
 }
 
 async function jget<T>(url: string): Promise<T> {
@@ -131,7 +135,8 @@ export const api = {
     jget<{ content: string }>(`/api/${repo}/chat/threads/${encodeURIComponent(name)}`),
 
   /** to 有給 → 手動改名;否則 claude 依主題自動命名(中文標題 + 英文 slug)。
-   *  回傳實際採用的檔名(可能加 -2 防衝突)與顯示標題;純中文輸入只改標題、檔名不動。 */
+   *  回傳實際採用的檔名(可能加 -2 防衝突)與顯示標題;純中文輸入只改標題、檔名不動。
+   *  綁檔的 thread 只換 `<slug>` 段,`-<file>-<hex12>` 後綴不動。 */
   renameThread: async (repo: string, name: string, to?: string) => {
     const r = await fetch(`/api/${repo}/chat/threads/${encodeURIComponent(name)}/rename`, {
       method: 'POST',
@@ -139,59 +144,31 @@ export const api = {
       body: to ? JSON.stringify({ to }) : undefined,
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return (await r.json()) as { name: string; title?: string | null };
+    return (await r.json()) as { name: string; title?: string | null; link?: string | null };
   },
 
-  sessions: (repo: string) => jget<{ sessions: ClaudeSession[] }>(`/api/${repo}/sessions`),
+  /** 某個檔的預設對話是哪一條(SPEC §4.2.1)。exists=false → 名字是建議值,還沒落檔。 */
+  threadForFile: (repo: string, path: string) =>
+    jget<{ name: string; title: string | null; exists: boolean }>(
+      `/api/${encodeURIComponent(repo)}/chat/for-file?path=${encodeURIComponent(path)}`,
+    ),
 
-  startSession: async (
-    repo: string,
-    id: string,
-    opts?: { yolo?: boolean; args?: string },
-  ) => {
-    const r = await fetch(`/api/${repo}/sessions/${encodeURIComponent(id)}/start`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(opts ?? {}),
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return (await r.json()) as { name: string };
-  },
+  /** 那輪還在跑嗎。 */
+  chatJob: (repo: string, thread: string) =>
+    jget<{ job: ChatJob | null }>(`/api/${repo}/chat/jobs/${encodeURIComponent(thread)}`),
 
-  newSession: async (
-    repo: string,
-    opts: { agent: string; yolo?: boolean; args?: string },
-  ) => {
-    const r = await fetch(`/api/${repo}/sessions/new`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(opts),
+  /** 中斷那輪(SIGTERM 那支 claude -p;已寫出的 turn 不回捲)。 */
+  cancelChat: async (repo: string, thread: string) => {
+    const r = await fetch(`/api/${repo}/chat/jobs/${encodeURIComponent(thread)}`, {
+      method: 'DELETE',
     });
     if (!r.ok) {
       const b = (await r.json().catch(() => ({}))) as { error?: string };
       throw new Error(b.error ?? `HTTP ${r.status}`);
     }
-    return (await r.json()) as { name: string };
   },
 
-  deleteSession: async (repo: string, id: string) => {
-    const r = await fetch(`/api/${repo}/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    if (!r.ok) {
-      const b = (await r.json().catch(() => ({}))) as { error?: string };
-      throw new Error(b.error ?? `HTTP ${r.status}`);
-    }
-  },
-
-  tmuxList: () => jget<{ sessions: string[] }>('/api/tmux'),
-
-  tmuxKill: async (name: string) => {
-    const r = await fetch(`/api/tmux/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  },
+  /** ⚙ 下拉的選項(model / effort 白名單由後端給,前端不自己編)。 */
+  chatEngine: () =>
+    jget<{ engine: string; models: string[]; efforts: string[] }>('/api/chat/engine'),
 };
-
-/** WebSocket URL(同 origin,dev 由 vite proxy 轉)。 */
-export function wsUrl(path: string): string {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${proto}://${location.host}${path}`;
-}

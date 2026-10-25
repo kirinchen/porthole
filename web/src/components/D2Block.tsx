@@ -140,7 +140,7 @@ export default function D2Block({ code, onApply, sessionKey }: Props) {
   return (
     <div
       style={{
-        border: editable ? '1px solid #f0f0f0' : undefined,
+        border: editable ? '1px solid var(--line)' : undefined,
         borderRadius: 8,
         padding: editable ? 8 : 0,
         margin: editable ? '8px 0' : 0,
@@ -169,7 +169,7 @@ export default function D2Block({ code, onApply, sessionKey }: Props) {
           <pre
             style={{
               color: '#cf1322',
-              background: '#fff1f0',
+              background: 'rgba(226,114,91,0.12)',
               padding: 8,
               borderRadius: 6,
               whiteSpace: 'pre-wrap',
@@ -253,7 +253,7 @@ export default function D2Block({ code, onApply, sessionKey }: Props) {
                 position: 'fixed',
                 inset: 0,
                 zIndex: 900,
-                background: '#fff',
+                background: 'var(--surface)',
                 padding: 12,
                 display: 'flex',
                 flexDirection: 'column',

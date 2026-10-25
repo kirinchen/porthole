@@ -84,7 +84,7 @@ export default function Outline({ text, onJump }: { text: string; onJump: (index
 
   const content =
     items.length === 0 ? (
-      <div style={{ color: '#999', padding: '4px 8px' }}>此文件沒有標題</div>
+      <div style={{ color: 'var(--muted)', padding: '4px 8px' }}>此文件沒有標題</div>
     ) : (
       <div
         style={{ maxHeight: 360, overflowY: 'auto', minWidth: 180, maxWidth: 360 }}

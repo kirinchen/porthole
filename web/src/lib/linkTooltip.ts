@@ -58,8 +58,8 @@ function mkTipButton(text: string, onDown: () => void): HTMLButtonElement {
   btn.textContent = text;
   btn.style.cssText =
     'border:none;background:transparent;cursor:pointer;font-size:13px;padding:4px 10px;' +
-    'border-radius:4px;white-space:nowrap;color:#1677ff;';
-  btn.onmouseenter = () => (btn.style.background = '#f0f7ff');
+    'border-radius:4px;white-space:nowrap;color:var(--accent);';
+  btn.onmouseenter = () => (btn.style.background = 'var(--accent-faint)');
   btn.onmouseleave = () => (btn.style.background = 'transparent');
   // mousedown + preventDefault:不搶焦點(detail 已備妥,亦避免無謂閃動)。
   btn.addEventListener('mousedown', (e) => {
@@ -75,7 +75,7 @@ export function showLinkTip(x: number, y: number, detail: LinkEditDetail, label 
   const el = document.createElement('div');
   el.setAttribute('data-loc', 'explore:edit:linktip');
   el.style.cssText =
-    'position:fixed;z-index:1500;background:#fff;border:1px solid #d9d9d9;border-radius:6px;' +
+    'position:fixed;z-index:1500;background:var(--card);border:1px solid var(--line);border-radius:6px;' +
     'box-shadow:0 2px 8px rgba(0,0,0,.15);padding:2px;display:flex;gap:2px;';
   el.appendChild(
     mkTipButton(label, () =>

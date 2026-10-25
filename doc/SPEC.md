@@ -1,7 +1,7 @@
 # porthole — SPEC(SSoT)
 
 > 舷窗。一個 path-scoped 的 web 介面,讓人透過瀏覽器跟住在各 repo 裡的 agent(主要是 coral 前台助理)高效溝通。
-> 取代純 CLI 對話的高溝通成本;參考 Claude Desktop 的左側 Tab 佈局。
+> 取代純 CLI 對話的高溝通成本。
 
 本檔是 porthole 的 **Single Source of Truth**。實作以本檔為準;與程式碼衝突時,先改本檔再改 code。
 
@@ -24,8 +24,8 @@
 |----|------|------|
 | 前端 | Vite + React 19 + TypeScript(strict) | 抄 InRay UI 殼;files tree / markdown 預覽可移植 |
 | UI 元件 | Antd 6 + 自寫 | 跟 InRay 一致 |
+| 視覺主題 | 深色,**色票與 Tide 看板統一** | 單一來源 `web/src/theme.ts`,見 §3.1 |
 | 後端 | 單一 node server,**Fastify** | 同時 serve 前端 build + REST/SSE + WebSocket + path 映射 |
-| 終端(CLI/Session) | `node-pty` + `xterm.js` | 真 PTY 才能 tmux attach、互動 console |
 | Chat 串流 | spawn `claude -p` → SSE | LLM as Unix tool:stdin→stdout 子程序,不整合 SDK |
 | 元素定位 | 移植 `DevPick.tsx`(Ctrl+F12) | 見 `doc/Wiki/guides/dev-pick-locator.md` |
 
@@ -39,47 +39,76 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 - **basePath = `<your-project-base>`**(原始碼內 `DEFAULT_BASE`,可由 env `PORTHOLE_BASE` 覆寫)。
 - URL 第一段 = repo 名:`http://localhost:4321/coral` → `<base>/coral` 頂該 repo root;`/inray` → `<base>/inray`,依此類推。
 - **path guard(REA 實體邊界)**:
-  - 所有 fs 讀寫、claude/tmux 的 CWD,**一律先正規化(`realpath`)再驗證仍落在 `<base>` 之內**;任何 `..` 逃逸出 base → 直接拒絕(HTTP 403)。
+  - 所有 fs 讀寫、`claude -p` 的 CWD,**一律先正規化(`realpath`)再驗證仍落在 `<base>` 之內**;任何 `..` 逃逸出 base → 直接拒絕(HTTP 403)。
   - 概念抄 InRay `inray-paths` path guard。這是把「web 變全機讀檔漏洞」擋掉的唯一防線(**僅就 fs 讀寫而言**,見下方適用範圍),**不靠 prompt,靠 code**。
   - 寫入面收斂(逐一明列才開放):
     - Chat:只能寫 `<repo>/doc/chat/`。
     - Explore 編輯:可寫 active repo 內**任一路徑**(覆寫既存或新增),仍受 path-guard 鎖在 repo root 內、逃不出 base。`PUT /api/:repo/file`。(注意:repo 內含 `.git/`、`.claude/` 等 dotfile 也在可寫範圍 → 寫 git hook 可間接執行;這在「單機自用 + 信任網路」前提下接受。)
-- **⚠️ 邊界的適用範圍(誠實聲明,別誤判)**:path guard 只約束 **fs 讀寫與子程序的 CWD**。**CLI / Session tab 是完整 PTY**(shell / `tmux attach`)——使用者可在其中 `cd` 到任何地方、執行任意指令,等同**以服務執行身分的完整 RCE**;path guard 對此**不是限制**(只決定起始目錄)。porthole **無認證**(§8,單機自用),所以 CLI/Session 的安全**完全靠「只在信任網路內、無未授權者可達」這個營運假設**撐著。對外開放 = 把一個 shell 開給該網段所有人。
-- **CSWSH 防線(WS 同源檢查)**:WebSocket 不受同源政策約束、無 CORS preflight,任何跨站網頁可在使用者瀏覽器內連本機 WS(`/ws/cli`、`/ws/tmux`)拿 shell —— **綁 `127.0.0.1` 也擋不住**,因為攻擊載體是使用者自己的瀏覽器。對策:WS upgrade 要求 `Origin` 與請求 `Host` 同源,跨站一律拒(`server/lib/ws-origin.ts`)。瀏覽器無法偽造 WebSocket Origin,故此檢查對 CSWSH 是實體邊界;非瀏覽器(無 Origin)放行。
+- **攻擊面(2026-10-25 大改版後)**:CLI / Session tab 連同 PTY、tmux、WebSocket 一併退場(原 §4.3 §4.4 已刪),porthole 的動作面只剩 **fs 讀寫** 與 **`claude -p` 子程序**,兩者的路徑與 CWD 都在 path-guard 內 → **不再有「以服務執行身分的完整 RCE」**。WS 路由歸零,故 CSWSH 防線(WebSocket 不受同源政策約束、綁 loopback 也擋不住)連同 `server/lib/ws-origin.ts` 一併移除 —— 沒有 WS 就沒有那個載體。
+- **仍要誠實聲明的一條**:`claude -p` 帶 `--dangerously-skip-permissions`(否則 agent 多數動作被權限提示卡住),所以 chat agent 在 CWD 下能讀寫檔、執行指令。擋它的是 path-guard 給的 CWD 與寫入面,**不是 prompt**;porthole 無認證(§8),對外的前提仍是「只在 tailnet 內、無未授權者可達」。
 - **預設綁 `127.0.0.1`(loopback)**。綁定由 repo root 的 `.env` 之 `HOST` 決定(`server/env.ts` 載入;設定範本 `.env.example`)。
   - **正式部署綁 tailscale 網卡 IP**(網址 **http://<your-tailscale-ip>:4321**)→ **只 tailnet 可達**,不開 LAN、也不綁 loopback。等於用 **tailnet 成員身分當網路層認證**,收掉 LAN 破口。本機開瀏覽器也走 tailscale 網址。部署見 `RUN.md`「systemd 常駐」+ `deploy/`。
-  - **不要綁 `0.0.0.0`**:那會連 LAN 整段一起開;porthole 無認證、CLI=RCE(見下),只在完全信任的網路才可。預設值仍維持 `127.0.0.1`,放寬綁定屬部署時的顯式決定(改 `.env`,不改 code 預設)。
-  - 注意:tailscale/區網走 **http**(非 https),非 secure context → 瀏覽器 `navigator.clipboard` 失效,複製功能受影響(見 §6)。path guard 仍是 fs 面的實體邊界,不因綁定位址放寬(但它不約束 CLI/Session 的 PTY,見上方適用範圍)。
+  - **不要綁 `0.0.0.0`**:那會連 LAN 整段一起開;porthole 無認證(§8),只在完全信任的網路才可。預設值仍維持 `127.0.0.1`,放寬綁定屬部署時的顯式決定(改 `.env`,不改 code 預設)。
+  - 注意:tailscale/區網走 **http**(非 https),非 secure context → 瀏覽器 `navigator.clipboard` 失效,複製功能受影響(見 §6)。path guard 仍是 fs 面的實體邊界,不因綁定位址放寬。
 
 ---
 
 ## 3. 佈局
 
-**桌面(≥md)= Obsidian/VSCode 式三欄**。頂部一條 repo 選擇器(決定 active repo root)。
-Explore(檔案樹 + 預覽/編輯)固定占左+中工作區、恆亮;右側面板以 tab 切
-Chat / Session / CLI,**保活不卸載**(切走不斷 session 終端 WS)。中央/右側交界用
-可拖動 Splitter 調寬窄,右側可收合。目的:**邊編輯檔案邊與 session 對話**。
+**兩個模式,頂部 header 切換**(`app:header:mode`,預設**檔案**):
+
+| 模式 | 版面 | 用途 |
+|---|---|---|
+| **檔案**(`#file`) | 三欄:檔案樹(左) + 預覽/編輯(中) + **當前檔的對話**(右) | 邊編輯檔案邊跟 agent 討論「這一份」 |
+| **對話**(`#chat`) | 兩欄:thread 列表(左) + 對話(右) | 把所有對話攤開來找 / 接續,不綁在某個檔上 |
+
+**桌面(≥md)**:中央與右側交界可拖動調寬;右側面板有視窗控制(撐滿 / 正常 / 最小化),**保活不卸載**。
+**手機(<md)**:單窗格 —— 檔案模式顯示 Explore(含它自己的樹抽屜),要對話就切到對話模式
+(對話模式在手機上用 `panel` 版面,thread 列表收進頂列的 List 選單)。
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ [repo ▾]   porthole · 舷窗                                  │
+│ porthole · 舷窗  [repo ▾]              [ 檔案 │ 對話 ]    │
 ├──────────────┬───────────────────────────┬───────────────┤
-│ explore:tree │  explore:preview          │ [Chat|Session │
-│  檔案樹       │  檔案預覽 / 編輯(恆在中央)│  |CLI] 切換    │
-│  (左)        │            ←  拖  →        │  保活、可收合  │
+│ explore:tree │  explore:preview          │ chat          │
+│  檔案樹       │  檔案預覽 / 編輯           │  當前檔的對話  │
+│              │            ←  拖  →        │  (綁檔)       │
 └──────────────┴───────────────────────────┴───────────────┘
 ```
 
-**手機(<md)= 單窗格**:三欄塞不下 → 退回左側窄欄四-Tab(Explore/Chat/Session/CLI)
-單選切換(舊 Claude Desktop 式),檔案樹於 Explore 內收進 Drawer。
+- **URL 狀態**:repo 走 pathname 第一段(`/coral`),模式走 hash(`#file` / `#chat`),對話走 `?thread=`(§4.2)。
+  reload / bookmark / 上一頁皆可還原;hash 純前端,server 不參與。
+  舊的 `#explore` 視為 `#file`;**退場的 `#session` / `#cli` 落回 `#file`**(舊書籤不會壞成白畫面)。
 
-- **URL 狀態**:repo 走 pathname 第一段(`/coral`),active tab 走 hash(`/coral#chat`)。
-  桌面 hash 決定右側面板選哪個(Explore 恆亮,故 hash=explore 時右側預設 Chat);
-  手機 hash 決定單窗格顯示哪個。reload / bookmark / 上一頁皆可還原;hash 純前端,server 不參與。
+### 3.1 視覺主題(與 Tide 看板統一)
+
+深色。色票 / 字型 / 圓角跟 **Tide 看板**(`tide/src/ui/style.css`)對齊。
+**單一來源 = `web/src/theme.ts`**:一份 `PALETTE` 常數,① 餵 Antd `ConfigProvider` 的 token、
+② 載入時寫成 `:root` 的 CSS 變數給自寫 markup 吃。要調色只改那一處,不另開第二套。
+
+| 變數 | 值 | 用途 |
+|---|---|---|
+| `--bg` | `#0e1a24` | 頁底 |
+| `--surface` | `#16242f` | 面板 / 欄 |
+| `--card` | `#1d3340` | 卡片 / 留言 |
+| `--line` | `#2a4452` | 框線 |
+| `--text` | `#d7e3ea` | 正文 |
+| `--muted` | `#7d97a5` | 次要文字 |
+| `--accent` | `#3fb6c4` | 主色 / 連結 / 焦點 |
+
+字型 `system-ui, "Noto Sans TC", sans-serif`,基準 `14px/1.5`,圓角 10。Antd 走 `theme.darkAlgorithm` + 上表 token。
+
+**連圖一起深色**,否則深色頁面中間會爆出一塊白:
+- mermaid `theme: 'dark'`、Excalidraw `theme="dark"`(皆對齊 Tide)。
+- d2 固定 `--theme=200`(Dark Mauve);**不要用 `--dark-theme`** —— 那是「瀏覽器 prefers-color-scheme
+  為深色才套」,使用者系統設亮色就會出白圖(Tide 踩過)。
+- CM6 編輯器的語法高亮不能用內建 `defaultHighlightStyle`(亮底配色,深色上讀不到)→
+  `web/src/lib/cmTheme.ts` 以 `CODE_TOKENS` 自建一份,**與預覽的 `.tok-*` 共用同一組色值**;
+  游標 / 選取 / gutter 也要明寫,CM6 預設是亮底的。
 
 ---
 
-## 4. 四個 Tab 規格
+## 4. 功能規格
 
 ### 4.1 Explore
 - files tree(抄 InRay `features/repo`),根 = active repo root。
@@ -127,35 +156,77 @@ Chat / Session / CLI,**保活不卸載**(切走不斷 session 終端 WS)。中�
   - **邊界**:只 widget 化行首表格 —— blockquote(`> `)/ 清單縮排內的表格保留純文字編輯(避免連前綴一起換掉而破壞結構)。預覽(非編輯)仍以 react-markdown + remark-gfm 渲染 HTML `<table>`。
 
 ### 4.2 Chat
-- 透過 `claude -p` 跟 active repo 的 agent 對話(coral → coral 前台助理)。
-- 子程序:`claude -p "<prompt>"`,CWD = active repo root,stdout 以 **SSE** 串回前端逐字顯示。
-- **active thread 存進 URL**(`?thread=<name>`,`replaceState` 不灌歷史;`default` 不寫參數):reload / 切 tab 回來都還在同一個 thread,也可直接把連結分享成 deep-link。換 repo 時由 App 重寫 pathname 自然清掉。Explore 的 `writeUrl` 會**保留** `thread`(同 `?sec` / `?edit=1`)—— 不留著的話在 Explore 開個檔就把 Chat 的 thread 從網址抹掉。
+
+**形狀照 Tide 看板的留言面板**(`tide/src/ui/CommentPanel.tsx`)。那支的檔頭註解寫著「版面參考 porthole 右側 chat」——
+現在反過來抄回來:Tide 那邊已經把留言卡 / 草稿 / job 狀態 / ⚙ 參數這些細節磨過一輪,porthole 不必再踩一次。
+
+- 透過 `claude -p` 跟 active repo 的 agent 對話(coral → coral 前台助理)。子程序 `claude -p "<prompt>"`,
+  CWD = active repo root,stdout 以 **SSE** 串回前端逐字顯示。
+- **訊息呈現 = 留言卡**(不是左右氣泡):每則 `@you` / `@<repo>` + 時間 + 🔗(複製該則 deep-link
+  `?thread=<t>&turn=<n>`;錨點走 query 不走 hash —— hash 已被模式占用)+ markdown 內容。
+  agent 回覆裡的 ```mermaid / ```d2 照樣渲染成圖(共用 Explore 的 `Markdown` 元件;Chat 僅呈現,
+  不提供 GUI 編輯)。`?turn=` 只在**換對話**時才從網址清掉,同一條對話要留著,否則 deep-link
+  會被初次同步自己抹掉。
+- **composer**:`@` mention 檔案(見下)、⌘/Ctrl+Enter 送出、⚙ 展開參數、送出鈕。
+  **草稿自動存**(per thread,`localStorage`,debounce 400ms;換 thread 載該 thread 自己的草稿,
+  送出成功才清)—— 刻意做在 onChange 而非 effect:換 thread 那一瞬間 value 還是舊的、key 已是新的,
+  用 effect 會把 A 的草稿存到 B 名下(Tide 踩過)。
+- **⚙ 參數**(使用者偏好,記 `localStorage`,不綁 thread):`model`(留空 = 該 CLI 自己的預設)、
+  `effort`。引擎固定 `claude`(§1:LLM as Unix tool,porthole 只走 `claude -p`)。
+  可選值由後端白名單給(`GET /api/chat/engine` → `{engine, models, efforts}`),前端不自己編清單 ——
+  argv 不經 shell 已擋掉注入,但把任意字串當 flag 丟給 CLI 會整趟起不來。
+- **job registry(跑著的那輪看得到、停得掉)**:後端記 in-flight run(`thread → {state, startedAt, model, effort}`)。
+  - `GET /api/:repo/chat/jobs/:thread` → `{job}`(無則 `null`)
+  - `DELETE /api/:repo/chat/jobs/:thread` → SIGTERM 那支 `claude -p`(已 append 的 turn 不回捲)
+  - 開 thread / 重整 / 另一台瀏覽器進來都先問這支 → 不必再靠「檔尾是 Human turn」去猜(那只是 fallback,
+    見下方 `chat:pending`);後端重啟則 registry 隨記憶體消失,退回 fallback。
+  - **client 斷線不 kill 子程序**:關分頁 / 重整 / 切走都讓那輪跑完並 append 到檔案(見下一條)。
+    要停就明確打 DELETE。斷線後 SSE 寫入會失敗 → 吞掉,不讓它炸掉 handler。
+- **某個檔的預設對話**:`GET /api/:repo/chat/for-file?path=` → `{name, title, exists}`(§4.2.1)。
+- **active thread 存進 URL**(`?thread=<name>`,`replaceState` 不灌歷史;`default` 不寫參數):reload / 切模式回來都還在同一個 thread,也可直接把連結分享成 deep-link。換 repo 時由 App 重寫 pathname 自然清掉。Explore 的 `writeUrl` 會**保留** `thread`(同 `?sec` / `?edit=1`)—— 不留著的話在 Explore 開個檔就把 Chat 的 thread 從網址抹掉。
 - **串流狀態 per thread**(`streamingThreads: Set<string>`,非單一 boolean):在 A 送出後切到 B 仍能送出(composer / 送出鈕只鎖住**正在串流的那個 thread**),thread 列表對正在跑的 thread 顯示 `chat:thread:running` 轉圈。送出時**捕捉當下的 thread 名**(非讀 `active`),且:① SSE 的 `delta` 只在該 thread 仍是 active 時才寫畫面(否則 A 的回覆會逐字接到使用者已切過去的 B 上);② 首輪自動命名的 `setActive` 只在使用者仍停在該 thread 時才做 —— 否則會把人從正在看的 thread 拉走,**下一則訊息就被寫進錯的 thread 檔案**(實際發生過:`kelp-credential-management-keyfp-registry.md` 混進了 `ssh-tmux-control-windows-laptop` 的一輪)。切走的那輪不中斷(後端照跑照 append),切回來由下一條的輪詢補齊。
-- **重整後仍在跑的那輪**(`chat:pending`):SSE 連線隨 reload 斷掉,但後端那趟 `claude -p` 還在跑、跑完照樣 append 到 `doc/chat/<thread>.md`(實測 16:01 送出 → 16:03 reload → 16:05 才寫完)。故開啟 thread 時若**檔尾是 Human turn 沒有 Assistant** → 視為「該輪仍在執行」(重整過,或在該 thread 送出後切走了),顯示提示(含「立即重讀」鈕)並每 5 秒輪詢該檔(上限 60 次 = 5 分鐘),assistant turn 一出現就自動補進畫面並停止輪詢。送出新訊息 / 開新 thread 會清掉此狀態(改由 SSE 接管)。**重新 attach 串流**(看逐字輸出)需後端記 in-flight run,未實作。
+- **重整後仍在跑的那輪**(`chat:pending`):SSE 連線隨 reload 斷掉,但後端那趟 `claude -p` 還在跑、跑完照樣 append 到檔案(實測 16:01 送出 → 16:03 reload → 16:05 才寫完)。開啟 thread 時先問 job registry;registry 沒了(後端重啟過)而**檔尾是 Human turn 沒有 Assistant** → 仍視為「該輪可能仍在執行」,顯示提示(含「立即重讀」鈕)並每 5 秒輪詢該檔(上限 60 次 = 5 分鐘),assistant turn 一出現就自動補進畫面並停止輪詢。送出新訊息 / 開新 thread 會清掉此狀態(改由 SSE 接管)。**重新 attach 串流**(回看逐字輸出)需後端緩衝 in-flight 輸出,未實作。
 - **對話記憶**:`claude -p` 每次是 stateless 一次性呼叫,故送出前把該 thread 先前的對話紀錄(turn markdown)當 context 接在最新訊息前一起餵入(尾端取最近 ~120KB),agent 才有上下文。
 - **紀錄持久化**:每個 thread 寫成一個 markdown 檔到 `<repo>/doc/chat/<thread>.md`(human + assistant 輪流,append)。
-- **檔名 vs 顯示標題**(`lib/chat-title`):**檔名一律英數 / `_` / `-`**(自動命名為 kebab-case slug;跨工具 / git / URL 都安全),中文放在檔案**第一行 `# 標題`**。`GET .../chat/threads` 每筆附 `title`(= 檔首第一個 H1,只讀前 4KB;遇 `## ` turn 標頭即停,故內文的 `# ` 不算),Chat 列表(`chat:list`)與 topbar 顯示 `title || name`、`title` 屬性仍給檔名。舊檔沒有 H1 → `title: null` → 退回顯示檔名。**標題存在檔案裡**才會跟著檔案走(搬移 / clone / 在 Explore 看都還在),不必另存 index 去 drift。
-- **首輪自動命名**:新 thread 預設 `thread-<ts>`;第一輪回覆完成後,後端 `POST .../threads/:thread/rename` 用**一次** `claude -p` 同時要到「繁中標題 + 英文 slug」(兩行輸出,`parseGenTitle` 解析),標題寫進檔首 H1(`setH1`:已有則取代該行,不會變兩個 H1)、slug 經 `fs.rename`(path-guard + 衝突加 `-N`)。生不出或同名則維持原名。
+- **檔名 vs 顯示標題**(`lib/chat-title`):**檔名一律英數 / `_` / `-`**(自動命名為 kebab-case slug;跨工具 / git / URL 都安全),中文放在檔案**第一行 `# 標題`**。`GET .../chat/threads` 每筆附 `title`(= 檔首第一個 H1,只讀前 4KB;遇 `## ` turn 標頭即停,故內文的 `# ` 不算)與 `link`(§4.2.1),列表與 topbar 顯示 `title || name`、`title` 屬性仍給檔名。舊檔沒有 H1 → `title: null` → 退回顯示檔名。**標題存在檔案裡**才會跟著檔案走(搬移 / clone / 在 Explore 看都還在),不必另存 index 去 drift。
+- **首輪自動命名**:新 thread 預設 `thread-<ts>`;第一輪回覆完成後,後端 `POST .../threads/:thread/rename` 用**一次** `claude -p` 同時要到「繁中標題 + 英文 slug」(兩行輸出,`parseGenTitle` 解析),標題寫進檔首 H1(`setH1`:已有則取代該行,不會變兩個 H1)、slug 經 `fs.rename`(path-guard + 衝突加 `-N`)。綁檔的 thread 只換檔名的 `<slug>` 段,`-<file>-<hex12>` 後綴保持不動(§4.2.1)。生不出或同名則維持原名。
 - **手動改名**:topbar 改名鈕(`chat:rename`)→ 同 rename 端點帶 `{to}`。`{to}` 即**顯示標題**(可中文),一律寫入檔首 H1;**檔名取 `slugify({to})`**(與自動命名同一套 kebab-case:「3090 24G 價格走勢」→ `3090-24g`,而非 `safeThread` 逐字換底線的 `3090_24G_____`);slug 為空(純中文)→ 檔名維持原樣,只改標題。空 thread(尚無檔)則本地改名,下次訊息寫新檔。
 - 取代 `claude-workbench/plugins/chat`(該方案太難用,porthole 不沿用其機制)。
 - thread 列表:讀 `<repo>/doc/chat/*.md`。
-- agent 回覆中的 ```mermaid 區塊同樣渲染成圖(共用 Explore 的 Markdown 元件;Chat 僅呈現,不提供 GUI 編輯)。
 - **composer @ mention 檔案**:輸入框打 `@` 觸發檔案 hint 下拉(`data-loc="chat:composer:mention"`)。
   - 選資料夾續查下一層、`../` 回上層;鍵盤 ↑↓ 選、Enter/Tab 選中、Esc 關(下拉關閉時 Enter 才送出)。
   - 選檔案插入 `@<repo 相對路徑>`(claude -p 原生吃 `@file`)。
   - 列檔複用 `GET /api/:repo/tree`;路徑導航受 path-guard 約束,超出 repo root → 403,下拉顯示「已到根」。
 
-### 4.3 Session
-- 列出 `claude -r` 可恢復的 session。
-- 點某個 session → 對應一個 **tmux session**,讓該 claude session 可在背景持續工作(detach 後仍跑)。
-- (開全新空白工作階段交給 CLI tab;Session 專注於恢復既有 claude session,避免功能重疊。)
-- UI 可 attach 進該 tmux(xterm.js)看即時輸出、可 detach。
-- tmux session 命名與生命週期管理(建立 / attach / detach / 列出 / 收掉)在實作前由 BDA 出細部設計,Kelp 驗收。**此 Tab 最複雜、風險最高**。
+#### 4.2.1 綁檔對話(file-linked chat)
 
-### 4.4 CLI
-- 基本 console:PTY shell,CWD = active repo root。
-- `node-pty` + `xterm.js`,WebSocket 雙向。
-- **⚠️ 這是完整 shell**:CWD 是 repo root,但使用者可 `cd` 出去執行任意指令(完整 RCE,非 path-guard 所能限制)。安全前提見 §2「邊界的適用範圍」與「CSWSH 防線」。
+**一個檔,一條預設對話。** 在檔案模式開著某個檔 → 右側對話就是那個檔的預設對話(沒有就現開一條,
+第一次送出才真正落檔)。概念照 kelp `doc/Wiki/guides/in-context-agent-chat.md` 的四要件:
+入口在物件旁、自動附上脈絡、由負責者回答、一個物件一條串。
+
+- **檔名規則**(`<repo>/doc/chat/`):`<slug>-<file>-<hex12>.md`
+  - `<slug>` = 主題 slug(首輪自動命名產生;還沒命名時固定 `chat`)
+  - `<file>` = 綁的檔名**含副檔名**,`.` → `-`、其餘非 `[A-Za-z0-9_-]` → `_`、截 48
+    (`silent-story-ide.md` → `silent-story-ide-md`)
+  - `<hex12>` = `sha256(<repo 相對資料夾路徑>)` 的前 12 碼 hex(repo 根目錄的檔 → 以 `''` 計算);
+    同名檔在不同夾不會撞,而且夾名多長檔名都只多 12 字
+  - 例:`doc/note/silent-story-ide.md` 的對話,開場時檔名 `chat-silent-story-ide-md-3f2a1b9c4d5e.md`,
+    首輪自動命名後變 `ide-design-review-silent-story-ide-md-3f2a1b9c4d5e.md`(只換 `<slug>` 段)
+- **權威來源在檔案裡,不是檔名**:檔首(H1 之後)寫一行 `<!-- porthole:link <repo 相對路徑> -->`。
+  檔名只是讓人在 `doc/chat/` 裡一眼看出「這條在聊哪個檔」;改名 / 搬檔後以註記為準。
+- **反查**:`GET .../chat/threads` 每筆回 `link`(讀前 4KB 的註記)。要找某檔的預設對話 →
+  先比 `link` 註記,再退回檔名後綴 `*-<file>-<hex12>.md`;都沒有 → 開新的。
+- **綁檔的對話可以改那個檔**:送出時 prompt 前綴一段脈絡區塊 ——
+  ```
+  [porthole 脈絡]
+  repo: <repo>
+  開著的檔: <repo 相對路徑>
+  你可以直接讀寫這個檔(CWD 已在 repo root)。改完回報:改了什麼 → 為什麼 → 還有什麼沒做。
+  ```
+  能力本來就有(`--dangerously-skip-permissions` + CWD 受 path-guard);這裡補的是**脈絡 + 明確授權 + 回報格式**。
+  邊界不變:寫入面仍由 path-guard 擋在 repo 內,prompt 不是防線。
+- **沒綁檔的對話**(對話模式按「新對話」開的)行為與舊版完全相同:`thread-<ts>` → 首輪自動命名成純 slug,
+  不寫 link 註記。
 
 ---
 
@@ -177,23 +248,22 @@ porthole/
 ├── doc/
 │   ├── SPEC.md            # 本檔(SSoT)
 │   └── Wiki/guides/       # dev-pick-locator.md + bda-rea-agent-split.md(BDA 必讀)
-├── server/                # Fastify:routes(chat/session/cli/fs)+ lib(claude-p/tmux/path-guard)
-└── web/                   # Vite React:tabs(Explore/Chat/Session/CLI)+ DevPick.tsx
+├── server/                # Fastify:routes(fs / chat / d2)+ lib(claude-p / chat-title / path-guard)
+└── web/                   # Vite React:tabs(Explore / Chat)+ theme.ts + DevPick.tsx
 ```
 
 ---
 
-## 7. 驗收標準(MVP / B 範圍:四 Tab 骨架)
+## 7. 驗收標準
 
-1. `npm run dev`(或等價)在 localhost:4321 起得來,四個 Tab 都可切換、不報錯。
+1. `npm run dev`(或等價)在 localhost:4321 起得來,**檔案 / 對話**兩個模式都可切換、不報錯。
 2. repo 選擇器可切 active repo;basePath 映射正確;path guard 擋得住 `../` 逃逸(要有測試)。
-3. Explore 能列 active repo 檔案樹、預覽 markdown。
-4. Chat 能跟 `claude -p` 一來一回,並把紀錄寫進 `<repo>/doc/chat/`。
-5. Session 能列 `claude -r` session、點一個能對到 tmux 並背景跑(細部設計先過 Kelp)。
-6. CLI 能開一個 PTY console、互動可用。
+3. Explore 能列 active repo 檔案樹、預覽 / 編輯 markdown。
+4. Chat 能跟 `claude -p` 一來一回,紀錄寫進 `<repo>/doc/chat/`;跑著的那輪**關掉頁面再回來看得到、停得掉**。
+5. 開著某個檔時右側對話 = 該檔的預設對話(檔名後綴對得上、link 註記寫得進去);對話模式能列出全部對話,
+   「新對話」開出來的不綁檔。
+6. 視覺:色票全部出自 `theme.ts` 的 `PALETTE`,畫面上沒有殘留的亮色硬編碼(`#fff` / `#f0f0f0` / `#001529`)。
 7. DevPick:Ctrl+F12 可 pick 並複製定位器(含 http fallback)。
-
----
 
 ## 8. 非目標(MVP 不做)
 
@@ -204,35 +274,40 @@ porthole/
 
 ## 9. 細設定案(BDA 提案,待 Kelp/Kirin 驗收)
 
-### 9.1 Session tab — claude session 列舉 + tmux 生命週期
+### 9.1 ~~Session tab~~(2026-10-25 退場)
 
-- **session 列舉(deterministic-first,不走互動式 `claude -r`)**:claude 把每個 session 存成
-  `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl`,`encoded-cwd` = repoRoot 把 `/`、`\` 換成 `-`。
-  一個 `.jsonl` = 一個可恢復 session。porthole 讀該目錄列出 id / mtime / 首則 user 訊息當標題。
-- **tmux 命名**:`porthole_<repo>_<id8>`,只留 `[A-Za-z0-9_]`(tmux 安全)。前綴 `porthole_` 供列舉/收斂。
-- **生命週期**:
-  - 建立:`tmux new-session -d -s <name> -c <repoRoot> 'claude --resume <id>'`(背景 detached)。
-  - attach:後端用 `node-pty` spawn `tmux attach -t <name>`,接到 WS `/ws/tmux/:name`,前端 xterm.js。
-  - detach:前端關閉 WS(切走/關 tab)→ tmux client 退出,**session 仍在背景續跑**(本 tab 的目的)。
-  - 收掉:`DELETE /api/tmux/:name`(名稱須符 `porthole_*`)→ `tmux kill-session`。
-  - porthole **不自動收** session;由使用者顯式收掉,或機器重開時自然消失。
-- **WS 協定**:client→server JSON 控制(`{type:'data'|'resize'}`);server→client 純文字 = pty 輸出。
+Session / CLI 兩個 Tab 連同 `node-pty` / `xterm.js` / tmux 生命週期 / WS(`/ws/cli`、`/ws/tmux`)全部移除。
+要互動式終端就開真的終端機(或 tmux);porthole 不再代理 PTY。好處見 §2「攻擊面」:
+porthole 從此沒有 RCE 面,也不用再守 CSWSH。
 
 ### 9.2 dev / prod 啟動
 
-- **dev**:`tsx watch` 跑 Fastify(4321,REST/SSE/WS)+ Vite dev(5173,proxy `/api`、`/ws` 到 4321)。
+- **dev**:`tsx watch` 跑 Fastify(4321,REST/SSE)+ Vite dev(5173,proxy `/api` 到 4321)。
   瀏覽器開 `http://127.0.0.1:5173/<repo>`。
-- **prod**:`vite build` → `web/dist`;Fastify serve dist(含 SPA fallback,非 `/api`、`/ws` 回 `index.html`)+ API,單 port 4321。瀏覽器開 `http://127.0.0.1:4321/<repo>`。
+- **prod**:`vite build` → `web/dist`;Fastify serve dist(含 SPA fallback,非 `/api` 回 `index.html`)+ API,單 port 4321。瀏覽器開 `http://127.0.0.1:4321/<repo>`。
 - 詳見 `RUN.md`。
 
 ### 9.3 Chat thread 檔名與格式
 
-- 檔名:`<repo>/doc/chat/<thread>.md`;`<thread>` 收斂為 `[A-Za-z0-9_-]`(≤64 字,`safeThread`;
+- 位置:`<repo>/doc/chat/<thread>.md`。`<thread>` 收斂為 `[A-Za-z0-9_-]`(≤96 字,`safeThread`;
   自動命名另經 `slugify` → kebab-case),空則 `default`,再經 path-guard 二次把關(寫入面只允許
   `doc/chat/`)。**不收中文檔名**(跨工具 / URL 風險),中文走檔首 H1 顯示標題。
-- 格式:檔首可有一行 `# <顯示標題>`(可中文,`lib/chat-title` 讀寫),之後 human / assistant 輪流
-  append,每段 `## 🧑 Human · <ISO>` / `## 🤖 Assistant · <ISO>` 標頭 + 內容。舊檔無 H1 亦合法
-  (列表 `title: null` → 顯示檔名)。前端 `parseThread` 以 `## 🧑/🤖` 切 turn,檔首 H1 自然被略過。
+- 綁檔的 thread 檔名為 `<slug>-<file>-<hex12>`(§4.2.1),故上限從 64 放寬到 96。
+- 格式(由上而下):
+  ```markdown
+  # <顯示標題>                                  ← 可中文,可省(舊檔沒有)
+  <!-- porthole:link doc/note/foo.md -->        ← 僅綁檔的 thread 有
+
+  ## 🧑 Human · <ISO>
+
+  …
+
+  ## 🤖 Assistant · <ISO>
+
+  …
+  ```
+  human / assistant 輪流 append。舊檔無 H1 / 無 link 亦合法(列表回 `title: null` / `link: null`)。
+  前端 `parseThread` 以 `## 🧑/🤖` 切 turn,檔首的 H1 與 link 註記自然被略過。
 
 ---
 

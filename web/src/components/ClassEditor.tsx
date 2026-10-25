@@ -95,7 +95,7 @@ function ClassNodeView({ data }: NodeProps) {
         width: NODE_W,
         border: '1px solid #555',
         borderRadius: 4,
-        background: '#fff',
+        background: 'var(--card)',
         fontSize: 12,
         overflow: 'hidden',
       }}
@@ -105,7 +105,7 @@ function ClassNodeView({ data }: NodeProps) {
           minHeight: HEADER_H,
           textAlign: 'center',
           fontWeight: 600,
-          background: '#f5f5f5',
+          background: 'var(--surface)',
           borderBottom: '1px solid #555',
           padding: '4px 6px',
           whiteSpace: 'nowrap',
@@ -121,7 +121,7 @@ function ClassNodeView({ data }: NodeProps) {
         {name}
       </div>
       {members.length === 0 ? (
-        <div style={{ height: ROW_H, lineHeight: `${ROW_H}px`, textAlign: 'center', color: '#aaa' }}>
+        <div style={{ height: ROW_H, lineHeight: `${ROW_H}px`, textAlign: 'center', color: 'var(--muted)' }}>
           (無成員)
         </div>
       ) : (
@@ -620,7 +620,7 @@ export default function ClassEditor({ code, onSave, onClose, fill }: Props) {
       <div
         style={{
           flex: 1,
-          border: '1px solid #f0f0f0',
+          border: '1px solid var(--line)',
           borderRadius: 8,
           minHeight: 0,
           outline: 'none',

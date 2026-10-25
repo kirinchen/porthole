@@ -11,16 +11,22 @@
 
 ## 它能做什麼
 
-- **Explore** — 檔案樹 + Markdown 即時預覽 / 編輯(CodeMirror 6,Obsidian 式 live-preview,內嵌 mermaid 互動圖)。依所在目錄新增檔 / 目錄、上傳檔案。
-- **Chat** — 跟 active repo 的 agent 對話,`claude -p` 逐字串流,紀錄寫進 `doc/chat/`。
-- **Session** — 列出可恢復的 claude session,點一個接進背景 `tmux`(detach 後背景續跑)。
-- **CLI** — 真 PTY 終端,CWD 鎖在 repo root。
+兩個模式,頂部切換:
 
-右側面板可切 Chat / Session / CLI,且**保活不卸載**(切走不斷終端);可拖寬、撐滿覆蓋中央、或最小化到右緣。
+- **檔案** — 檔案樹 + Markdown 即時預覽 / 編輯(CodeMirror 6,Obsidian 式 live-preview,內嵌 mermaid 互動圖),依所在目錄新增檔 / 目錄、上傳檔案;右側是**當前開著那個檔的對話**。
+- **對話** — 全部對話攤開:左邊列表、右邊對話。跟 active repo 的 agent 講話走 `claude -p` 逐字串流,紀錄寫進 `doc/chat/`。
 
-| 編輯(CM6 即時預覽 + mermaid 互動 box) | 終端(CLI / Session) |
-|---|---|
-| ![editor](assets/screenshots/editor.png) | ![cli](assets/screenshots/cli.png) |
+**一個檔,一條對話**:開著某個檔時右側那條對話綁在它身上(檔名 `<slug>-<檔名>-<資料夾雜湊>.md`,
+檔內寫 `<!-- porthole:link … -->`),agent 拿得到「你正在看哪個檔」的脈絡,也能直接改它。
+不想綁檔就在對話模式按「新對話」。
+
+右側面板**保活不卸載**,可拖寬、撐滿覆蓋中央、或最小化到右緣。
+
+> Session / CLI(PTY 終端 + tmux)已於 2026-10-25 退場 —— 要互動式終端請開真的終端機。
+
+| 編輯(CM6 即時預覽 + mermaid 互動 box) |
+|---|
+| ![editor](assets/screenshots/editor.png) |
 
 ---
 
@@ -62,9 +68,9 @@
 
 porthole 預設只給**單機自用 + 信任網路**。請務必理解:
 
-- **無認證**。CLI / Session 是完整 PTY,等同**以執行身分的完整 RCE**;path guard 只鎖 fs 讀寫與子程序 CWD,不限制終端能跑什麼。
-- **path guard**(安全命脈):所有 fs 讀寫、claude/tmux 的 CWD 一律 `realpath` 正規化後驗證仍落在 basePath 內,`..` / symlink 逃逸即 **403**。靠 code 擋,不靠 prompt。
-- **WS 同源檢查** 擋 CSWSH(跨站網頁連本機 WS 拿 shell);綁 `127.0.0.1` 也擋不住,故此檢查不可少。
+- **無認證**。
+- **path guard**(安全命脈):所有 fs 讀寫、`claude -p` 的 CWD 一律 `realpath` 正規化後驗證仍落在 basePath 內,`..` / symlink 逃逸即 **403**。靠 code 擋,不靠 prompt。
+- **動作面只剩 fs + `claude -p` 子程序**(PTY / tmux / WebSocket 已移除)→ 不再有「以執行身分的完整 RCE」,也不用再守 CSWSH。但 chat agent 帶 `--dangerously-skip-permissions`,在 repo 內讀寫 / 執行指令是它的本分 —— 邊界是 CWD 與寫入面,不是 prompt。
 - **綁定**:預設 `127.0.0.1`。要遠端用,建議綁 **tailscale 網卡 IP**(只 tailnet 可達)。**不要綁 `0.0.0.0`** —— 那會連同整個 LAN 一起開放。
 
 > 一句話:這是「給自己用的遠端終端」,不是多人服務。只在你完全信任的網路裡跑。細節見 [`doc/SPEC.md`](doc/SPEC.md) §2。
@@ -94,9 +100,9 @@ npm run prod                         # 建置前端 + 單 port 4321 serve
 
 ## 技術
 
-- 前端:Vite + React 19 + TypeScript(strict)+ Antd 6 + CodeMirror 6 + xterm.js
-- 後端:Fastify(單 port,serve build + REST/SSE + WebSocket + path 映射)
-- 終端:`node-pty` + `tmux`;LLM:shell out 到 `claude -p`(不整合 SDK)
+- 前端:Vite + React 19 + TypeScript(strict)+ Antd 6 + CodeMirror 6;深色主題色票與 [Tide 看板](../tide) 統一(單一來源 `web/src/theme.ts`)
+- 後端:Fastify(單 port,serve build + REST/SSE + path 映射)
+- LLM:shell out 到 `claude -p`(不整合 SDK)
 
 設計原則:安全邊界優先、deterministic-first、LLM as Unix tool、薄。
 

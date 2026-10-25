@@ -195,7 +195,7 @@ export default function ImagePickerDialog({ repo, baseDir, open, onClose, onInse
                     alignItems: 'center',
                     gap: 6,
                     padding: '6px 10px',
-                    border: '1px solid #f0f0f0',
+                    border: '1px solid var(--line)',
                     borderRadius: 6,
                     cursor: 'pointer',
                     fontSize: 13,
@@ -225,7 +225,7 @@ export default function ImagePickerDialog({ repo, baseDir, open, onClose, onInse
                   onClick={() => pick(im)}
                   title={`插入 ${im.name}`}
                   style={{
-                    border: '1px solid #f0f0f0',
+                    border: '1px solid var(--line)',
                     borderRadius: 8,
                     padding: 6,
                     cursor: 'pointer',
@@ -242,7 +242,7 @@ export default function ImagePickerDialog({ repo, baseDir, open, onClose, onInse
                       width: '100%',
                       height: 90,
                       objectFit: 'contain',
-                      background: '#fafafa',
+                      background: 'var(--surface)',
                       borderRadius: 4,
                     }}
                   />

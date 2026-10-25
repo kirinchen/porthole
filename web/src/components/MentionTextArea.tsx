@@ -205,8 +205,8 @@ export default function MentionTextArea({
             marginBottom: 4,
             maxHeight: 240,
             overflow: 'auto',
-            background: '#fff',
-            border: '1px solid #d9d9d9',
+            background: 'var(--card)',
+            border: '1px solid var(--line)',
             borderRadius: 8,
             boxShadow: '0 6px 16px rgba(0,0,0,0.12)',
             zIndex: 1000,
@@ -217,16 +217,16 @@ export default function MentionTextArea({
             style={{
               padding: '4px 12px',
               fontSize: 12,
-              color: '#999',
-              borderBottom: '1px solid #f0f0f0',
+              color: 'var(--muted)',
+              borderBottom: '1px solid var(--line)',
             }}
           >
             {dir === '.' ? repo : `${repo}/${dir}`}
           </div>
           {tooDeep ? (
-            <div style={{ padding: '8px 12px', fontSize: 12, color: '#999' }}>已到 repo 根</div>
+            <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--muted)' }}>已到 repo 根</div>
           ) : filtered.length === 0 ? (
-            <div style={{ padding: '8px 12px', fontSize: 12, color: '#999' }}>無相符項目</div>
+            <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--muted)' }}>無相符項目</div>
           ) : (
             filtered.map((it, i) => (
               <div
@@ -243,17 +243,17 @@ export default function MentionTextArea({
                   gap: 8,
                   padding: '6px 12px',
                   cursor: 'pointer',
-                  background: i === activeIdx ? '#e6f4ff' : undefined,
+                  background: i === activeIdx ? 'var(--accent-soft)' : undefined,
                 }}
               >
                 {it.type === 'dir' ? (
                   <FolderFilled style={{ color: '#faad14' }} />
                 ) : (
-                  <FileOutlined style={{ color: '#8c8c8c' }} />
+                  <FileOutlined style={{ color: 'var(--muted)' }} />
                 )}
                 {it.name === '..' && it.type === 'dir' ? (
                   <span>
-                    ../ <span style={{ color: '#999', fontSize: 12 }}>上一層</span>
+                    ../ <span style={{ color: 'var(--muted)', fontSize: 12 }}>上一層</span>
                   </span>
                 ) : (
                   <span>

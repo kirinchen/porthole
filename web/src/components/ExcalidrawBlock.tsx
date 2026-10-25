@@ -105,7 +105,7 @@ export default function ExcalidrawBlock({ code, onApply, sessionKey }: Props) {
   return (
     <div
       style={{
-        border: editable ? '1px solid #f0f0f0' : undefined,
+        border: editable ? '1px solid var(--line)' : undefined,
         borderRadius: 8,
         padding: editable ? 8 : 0,
         margin: editable ? '8px 0' : 0,
@@ -125,7 +125,7 @@ export default function ExcalidrawBlock({ code, onApply, sessionKey }: Props) {
 
       {mode === 'preview' &&
         (err ? (
-          <pre style={{ color: '#cf1322', background: '#fff1f0', padding: 8, borderRadius: 6, whiteSpace: 'pre-wrap' }}>
+          <pre style={{ color: 'var(--danger)', background: 'rgba(226,114,91,0.12)', padding: 8, borderRadius: 6, whiteSpace: 'pre-wrap' }}>
             excalidraw 預覽失敗:{err}
           </pre>
         ) : loading ? (
@@ -135,7 +135,7 @@ export default function ExcalidrawBlock({ code, onApply, sessionKey }: Props) {
         ) : svg ? (
           <div style={{ textAlign: 'center', overflow: 'auto' }} dangerouslySetInnerHTML={{ __html: svg }} />
         ) : (
-          <div style={{ textAlign: 'center', color: '#999', padding: 24 }}>(空白白板)</div>
+          <div style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>(空白白板)</div>
         ))}
 
       {mode === 'edit' && (
@@ -198,7 +198,7 @@ export default function ExcalidrawBlock({ code, onApply, sessionKey }: Props) {
                 position: 'fixed',
                 inset: 0,
                 zIndex: 900,
-                background: '#fff',
+                background: 'var(--surface)',
                 padding: 12,
                 display: 'flex',
                 flexDirection: 'column',

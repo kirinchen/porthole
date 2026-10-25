@@ -68,7 +68,7 @@ function EntityNode({ data }: NodeProps) {
         width: NODE_W,
         border: '1px solid #555',
         borderRadius: 4,
-        background: '#fff',
+        background: 'var(--card)',
         fontSize: 12,
         overflow: 'hidden',
       }}
@@ -79,7 +79,7 @@ function EntityNode({ data }: NodeProps) {
           lineHeight: `${HEADER_H}px`,
           textAlign: 'center',
           fontWeight: 600,
-          background: '#f5f5f5',
+          background: 'var(--surface)',
           borderBottom: '1px solid #555',
           padding: '0 6px',
           whiteSpace: 'nowrap',
@@ -90,7 +90,7 @@ function EntityNode({ data }: NodeProps) {
         {name}
       </div>
       {attrs.length === 0 ? (
-        <div style={{ height: ROW_H, lineHeight: `${ROW_H}px`, textAlign: 'center', color: '#aaa' }}>
+        <div style={{ height: ROW_H, lineHeight: `${ROW_H}px`, textAlign: 'center', color: 'var(--muted)' }}>
           (無屬性)
         </div>
       ) : (
@@ -103,7 +103,7 @@ function EntityNode({ data }: NodeProps) {
               display: 'flex',
               gap: 6,
               padding: '0 6px',
-              borderTop: i === 0 ? 'none' : '1px solid #eee',
+              borderTop: i === 0 ? 'none' : '1px solid var(--line)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
             }}
@@ -522,7 +522,7 @@ export default function ErdEditor({ code, onSave, onClose, fill }: Props) {
       <div
         style={{
           flex: 1,
-          border: '1px solid #f0f0f0',
+          border: '1px solid var(--line)',
           borderRadius: 8,
           minHeight: 0,
           outline: 'none',

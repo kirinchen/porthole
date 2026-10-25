@@ -39,7 +39,7 @@ function nodeText(node: ReactNode): string {
 
 /** 章節錨點:更新網址列(?sec=slug,保留 #tab)、捲動、複製完整連結。 */
 function jumpAndCopySection(slug: string): void {
-  const rel = `${location.pathname}?sec=${encodeURIComponent(slug)}${location.hash || '#explore'}`;
+  const rel = `${location.pathname}?sec=${encodeURIComponent(slug)}${location.hash || '#file'}`;
   history.replaceState(null, '', rel);
   scrollToHeadingSlug(slug);
   const full = location.origin + rel;
@@ -50,7 +50,7 @@ function jumpAndCopySection(slug: string): void {
 
 /** 章節錨點的完整可分享 href(?sec=slug 保留 #tab)——供中鍵 / 複製網址 / hover 用。 */
 function sectionHref(slug: string): string {
-  return `${location.pathname}?sec=${encodeURIComponent(slug)}${location.hash || '#explore'}`;
+  return `${location.pathname}?sec=${encodeURIComponent(slug)}${location.hash || '#file'}`;
 }
 
 /**
@@ -105,7 +105,7 @@ function MdLink({ href, children }: { href?: string; children?: React.ReactNode 
   const target = href ? resolveLink(href, repo, cur?.path ?? '') : null;
   const internal = target?.kind === 'internal' ? target : null;
   // 連結沒寫 #tab → href 補目前 tab(讓 hover / 中鍵開新分頁的網址一致、完整)。
-  const hrefTab = internal ? internal.tab || location.hash.replace(/^#/, '') || 'explore' : '';
+  const hrefTab = internal ? internal.tab || location.hash.replace(/^#/, '') || 'file' : '';
   const sec = internal?.section ? `?sec=${encodeURIComponent(internal.section)}` : '';
   const resolvedHref = internal
     ? `/${encodeURIComponent(internal.repo)}/${internal.path.split('/').map(encodeURIComponent).join('/')}${sec}#${hrefTab}`
@@ -123,7 +123,7 @@ function MdLink({ href, children }: { href?: string; children?: React.ReactNode 
       history.replaceState(
         null,
         '',
-        `${location.pathname}?sec=${encodeURIComponent(target.section)}${location.hash || '#explore'}`,
+        `${location.pathname}?sec=${encodeURIComponent(target.section)}${location.hash || '#file'}`,
       );
       scrollToHeadingSlug(target.section);
       return;

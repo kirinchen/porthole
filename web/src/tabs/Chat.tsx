@@ -1,46 +1,83 @@
 /**
- * Chat tab — 透過 claude -p 跟 active repo 的 agent 對話。
- *  - 左:thread 列表(讀 <repo>/doc/chat/*.md)
- *  - 右:對話內容 + composer
- *  - 送出 → POST /api/:repo/chat,SSE 逐字串回;後端把紀錄 append 到 doc/chat/<thread>.md
+ * Chat — 跟 active repo 的 agent 對話(`claude -p`)。
  *
- *  **reload 的兩個坑**(實測:16:01 送出 → 16:03 reload → 16:05 後端才寫完回覆):
- *   1. active thread 存進 URL `?thread=`(換 repo 時由 App 重寫 pathname 自然清掉)——
- *      否則 reload 一律回 default,使用者得自己點回剛才那個 thread。
- *   2. SSE 連線隨 reload 斷掉,但後端那趟 `claude -p` 還在跑、跑完照樣 append 到檔案。
- *      故重開時若**檔尾是 Human turn 沒有 Assistant** → 視為「該輪仍在執行」,顯示提示
- *      並輪詢該檔(POLL_MS / POLL_MAX),回覆一寫進檔案就自動補上;不必使用者手動重整。
+ * **形狀照 tide 的留言面板**(`tide/src/ui/CommentPanel.tsx`;那支的註解寫著「版面參考
+ * porthole 右側 chat」—— 現在反過來抄回來)。訊息是**留言卡**而不是左右氣泡:
+ * `@you` / `@<repo>` + 時間 + 🔗 複製該則連結 + markdown 內容。
  *
- *  **串流狀態是 per thread**(`streamingThreads`,非單一 boolean):在 A 送出後切到 B
- *  還要能繼續送(送出鈕只鎖住正在串流的那個 thread),而且 A 的 delta 只有在 A 仍是
- *  active 時才寫畫面 —— 否則切去 B 後,A 的回覆會逐字接到 B 的對話上。切走那輪不中斷
- *  (後端照跑照寫檔),切回來由上面的輪詢補齊。
+ * 兩種版面(SPEC §3):
+ *  - `panel`(檔案模式的右欄):頂列有 List 選單;`linkPath` 決定開哪一條**綁檔對話**。
+ *  - `full`(對話模式):左邊一欄列出全部對話,右邊是對話本體。
+ *
+ * 幾個踩過的坑,改這支前先讀(細節見 SPEC §4.2):
+ *  1. **串流狀態 per thread**(`streamingThreads`,非單一 boolean):A 送出後切到 B 還要能送,
+ *     且 A 的 delta 只在 A 仍是 active 時才寫畫面 —— 否則 A 的回覆會逐字接到 B 的畫面上。
+ *  2. **首輪自動命名的 setActive 只在使用者仍停在該 thread 時才做**:否則會把人從正在看的
+ *     對話拉走,下一則訊息就被寫進錯的檔案(2026-10 真的發生過)。
+ *  3. **送出時綁定當下的 thread 名**(`const thread = active`),不要在 callback 裡讀 state。
+ *  4. **草稿存在 onChange**,不要用 effect(換 thread 那一瞬間會把 A 的草稿存到 B 名下)。
+ *  5. 跑著的那輪由後端 **job registry** 認定(關分頁再回來看得到、停得掉);registry 沒了
+ *     (後端重啟)才退回「檔尾是 Human turn」的猜測 + 檔案輪詢。
  */
-import { useEffect, useRef, useState } from 'react';
-import { Button, List, Spin, Alert, Typography, Space, Popover, Modal, Input } from 'antd';
-import { UnorderedListOutlined, EditOutlined } from '@ant-design/icons';
-import { api, type ThreadMeta } from '../lib/api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button, List, Spin, Alert, Typography, Popover, Modal, Input, Select, Tooltip } from 'antd';
+import {
+  UnorderedListOutlined,
+  EditOutlined,
+  SettingOutlined,
+  SendOutlined,
+  StopOutlined,
+  FileTextOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons';
+import { api, type ThreadMeta, type ChatJob } from '../lib/api';
 import MentionTextArea from '../components/MentionTextArea';
 import Markdown from '../components/Markdown';
+import { copyText } from '../lib/clipboard';
+import {
+  clearDraft,
+  draftKey,
+  getEffort,
+  getModel,
+  loadDraft,
+  pruneDrafts,
+  saveDraft,
+  setEffort as writeEffort,
+  setModel as writeModel,
+} from '../lib/chatPrefs';
 
 interface Props {
   repo: string;
-  isActive?: boolean; // 是否為目前 active 的右側面板(只有 active 才接收 ContentPick 引用)
+  /** 是否為目前 active 的面板(只有 active 才接收 ContentPick 引用)。 */
+  isActive?: boolean;
+  /** `panel` = 檔案模式右欄;`full` = 對話模式(自帶左側列表)。 */
+  layout?: 'panel' | 'full';
+  /** 檔案模式:目前開著的檔(repo 相對路徑)→ 自動切到該檔的預設對話(SPEC §4.2.1)。 */
+  linkPath?: string | null;
 }
 
 interface Turn {
   role: 'human' | 'assistant';
   text: string;
+  /** turn 標頭上的 ISO 時間;舊檔解不出來 → 空字串。 */
+  at: string;
 }
 
 /** 等「後端仍在跑」那輪回覆的輪詢:5s 一次,最多 5 分鐘(claude -p 深度題目可跑數分鐘)。 */
 const POLL_MS = 5000;
 const POLL_MAX = 60;
 
-/** URL `?thread=` → thread 名(reload 回到同一個 thread)。 */
+/** URL `?thread=` → thread 名(reload 回到同一條對話)。 */
 function threadFromUrl(): string | null {
   const t = new URLSearchParams(location.search).get('thread');
   return t ? t.trim() || null : null;
+}
+
+/** URL `?turn=` → 第幾則(1-based,deep-link 用);非法 → null。 */
+function turnFromUrl(): number | null {
+  const n = Number(new URLSearchParams(location.search).get('turn'));
+  return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 /** URL 第一段 = repo(與 App 的 repoFromUrl 同規則);popstate 要據此判斷是否同 repo。 */
@@ -50,13 +87,16 @@ function repoFromUrl(): string {
 
 /**
  * active thread → URL `?thread=`(`default` 則移除參數)。
- * push=true(使用者切 thread / 開新對話)→ 留歷史一筆,上一頁可回前一個 thread;
- * push=false(改名、初次同步)→ replaceState,同一個 thread 換個名字不該多一筆歷史。
+ * **換了對話**才清掉 `?turn=`(那是某一則的錨點,換對話就失效);同一條對話要留著,
+ * 否則帶 `?turn=` 進來的 deep-link 會在初次同步時被自己抹掉,重整就跳不回那一則。
+ * push=true(使用者切對話 / 開新對話)→ 留歷史一筆;push=false(改名、初次同步)→ replaceState。
  */
 function writeThreadUrl(name: string, push = false): void {
   const params = new URLSearchParams(location.search);
+  const changed = (params.get('thread') ?? 'default') !== (name || 'default');
   if (name && name !== 'default') params.set('thread', name);
   else params.delete('thread');
+  if (changed) params.delete('turn');
   const qs = params.toString();
   const url = `${location.pathname}${qs ? `?${qs}` : ''}${location.hash}`;
   if (url === location.pathname + location.search + location.hash) return;
@@ -64,58 +104,95 @@ function writeThreadUrl(name: string, push = false): void {
   else history.replaceState(null, '', url);
 }
 
-export default function Chat({ repo, isActive }: Props) {
+const fmtAt = (iso: string) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+};
+
+export default function Chat({ repo, isActive, layout = 'panel', linkPath }: Props) {
   const [threads, setThreads] = useState<ThreadMeta[]>([]);
   const [active, setActive] = useState<string>(() => threadFromUrl() ?? 'default');
-  // 重開後偵測到「上一輪還在後端跑」(檔尾是 Human turn,無 Assistant)→ 顯示提示 + 輪詢。
-  const [pendingReply, setPendingReply] = useState(false);
+  // active thread 的顯示標題(檔首 H1,可中文);null = 該檔沒標題 → 顯示檔名。
+  const [activeTitle, setActiveTitle] = useState<string | null>(null);
+  // active thread 綁的檔(檔內 link 註記);null = 沒綁。
+  const [activeLink, setActiveLink] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
   // 正在串流的 thread 名集合(per thread —— 在 A 送出後切到 B 仍可送出)。
   const [streamingThreads, setStreamingThreads] = useState<Set<string>>(new Set());
-  const streaming = streamingThreads.has(active); // 目前這個 thread 是否在串流
+  const streaming = streamingThreads.has(active);
+  // 後端 job registry 說這條還在跑(= 別的分頁 / 重整前送出的那輪)。
+  const [job, setJob] = useState<ChatJob | null>(null);
+  // registry 查不到(後端重啟過)但檔尾是 Human turn → 可能還在跑,退回檔案輪詢。
+  const [pendingReply, setPendingReply] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [listOpen, setListOpen] = useState(false); // 頂部 List 選單(thread 列表)
+  const [listOpen, setListOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameVal, setRenameVal] = useState('');
-  // active thread 的顯示標題(檔首 H1,可中文);null = 該檔沒標題 → 顯示檔名。
-  const [activeTitle, setActiveTitle] = useState<string | null>(null);
+  const [cfgOpen, setCfgOpen] = useState(false);
+  const [model, setModel] = useState(getModel);
+  const [effort, setEffort] = useState(getEffort);
+  const [engine, setEngine] = useState<{ models: string[]; efforts: string[] } | null>(null);
+  // deep-link `?turn=` 指到的那一則(高亮)。
+  const [highlight, setHighlight] = useState<number | null>(() => turnFromUrl());
   const bottomRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef(true);
   useEffect(() => {
     activeRef.current = isActive !== false;
   }, [isActive]);
 
-  const loadThreads = () => {
+  useEffect(() => {
+    pruneDrafts();
+  }, []);
+
+  const loadThreads = useCallback(() => {
     api
       .threads(repo)
       .then((r) => setThreads(r.threads))
       .catch((e: Error) => setErr(e.message));
-  };
+  }, [repo]);
 
-  // thread 改名:有檔(已對話過)→ 後端 fs.rename;無檔(空 thread)→ 本地改名,下次訊息寫新檔。
-  const doRename = async () => {
-    const to = renameVal.trim();
-    if (!to || to === active) {
-      setRenameOpen(false);
-      return;
-    }
-    try {
-      // 後端:標題寫進檔首 H1;檔名只在輸入含英數時才改(純中文 → 檔名不動)。
-      const { name, title } = await api.renameThread(repo, active, to);
+  /** 開某條對話。push=true(使用者從列表點選)→ 在歷史留一筆。 */
+  const openThread = useCallback(
+    async (name: string, push = false) => {
+      if (push) writeThreadUrl(name, true);
       setActive(name);
-      setActiveTitle(title ?? null);
-      loadThreads();
-    } catch {
-      // 無檔(空 thread)→ 本地改名,下次訊息才寫檔;此時檔名仍需收斂成安全字元。
-      setActive(to.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64) || 'default');
-      setActiveTitle(null);
-    }
-    setRenameOpen(false);
-  };
+      setErr(null);
+      // 開的正是 URL 指到的那條 → 沿用 `?turn=` 的錨點(deep-link 初次載入會走到這裡);
+      // 換成別條就丟掉錨點,否則永遠不自動捲到底。
+      setHighlight(name === (threadFromUrl() ?? 'default') ? turnFromUrl() : null);
+      setInput(loadDraft(draftKey(repo, name)));
+      const meta = threads.find((t) => t.name === name);
+      setActiveTitle(meta?.title ?? null);
+      setActiveLink(meta?.link ?? null);
+      let parsed: Turn[] = [];
+      try {
+        const r = await api.thread(repo, name);
+        parsed = parseThread(r.content);
+        setTurns(parsed);
+        setActiveLink(parseLink(r.content) ?? meta?.link ?? null);
+      } catch {
+        setTurns([]); // 新對話(還沒落檔)
+      }
+      // 跑著的那輪:先問後端 registry(權威)。問不到才看「檔尾是 Human turn」。
+      let running: ChatJob | null = null;
+      try {
+        running = (await api.chatJob(repo, name)).job;
+      } catch {
+        /* 問不到 → 當作沒有 */
+      }
+      setJob(running);
+      setPendingReply(!running && parsed.length > 0 && parsed[parsed.length - 1].role === 'human');
+    },
+    [repo, threads],
+  );
+  // effect / callback 要讀「最新的 openThread」但不想讓它進 deps(threads 一變就重綁)。
+  const openRef = useRef(openThread);
+  openRef.current = openThread;
 
-  // 換 repo → 清狀態。**初次掛載例外**:沿用 URL `?thread=` 的 thread 並把它讀出來,
-  // 否則 reload 後會被這裡重設成 default(= 使用者回報的「refresh 就沒反應」)。
+  // 換 repo → 清狀態。**初次掛載例外**:沿用 URL `?thread=`,否則 reload 後會被重設成
+  // default(= 使用者回報過的「refresh 就沒反應」)。
   const didInit = useRef(false);
   useEffect(() => {
     setThreads([]);
@@ -124,26 +201,72 @@ export default function Chat({ repo, isActive }: Props) {
     const urlThread = didInit.current ? null : threadFromUrl();
     didInit.current = true;
     if (urlThread) {
-      void openThread(urlThread);
+      void openRef.current(urlThread);
     } else {
       setActive('default');
       setActiveTitle(null);
+      setActiveLink(null);
       setPendingReply(false);
+      setJob(null);
     }
     loadThreads();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repo]);
+  }, [repo, loadThreads]);
+
+  // ⚙ 的選項由後端給(白名單),前端不自己編清單。
+  useEffect(() => {
+    api
+      .chatEngine()
+      .then((r) => setEngine({ models: r.models, efforts: r.efforts }))
+      .catch(() => setEngine(null));
+  }, []);
+
+  /**
+   * 檔案模式:開著的檔 → 那個檔的預設對話(SPEC §4.2.1)。
+   * URL 帶 `?thread=` 的初次載入讓 URL 贏(deep-link 比「現在開著哪個檔」優先);
+   * 之後換檔就跟著換對話。
+   */
+  const urlThreadWins = useRef(!!threadFromUrl());
+  useEffect(() => {
+    if (layout !== 'panel' || !linkPath) return;
+    if (urlThreadWins.current) {
+      urlThreadWins.current = false; // 只讓第一次生效
+      return;
+    }
+    let alive = true;
+    api
+      .threadForFile(repo, linkPath)
+      .then((r) => {
+        if (!alive) return;
+        if (r.exists) {
+          void openRef.current(r.name);
+        } else {
+          // 還沒有這個檔的對話 → 開一條空的(第一次送出才落檔)
+          setActive(r.name);
+          setActiveTitle(null);
+          setActiveLink(linkPath);
+          setTurns([]);
+          setPendingReply(false);
+          setJob(null);
+          setInput(loadDraft(draftKey(repo, r.name)));
+        }
+      })
+      .catch(() => {
+        /* 問不到就維持現狀 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [repo, linkPath, layout]);
 
   // active → URL 的保底同步(改名 / 自動命名 / 初次掛載):replaceState,不灌歷史。
-  // 使用者主動切 thread 的那一筆歷史由 openThread(push) / newThread 負責。
   useEffect(() => {
     writeThreadUrl(active);
   }, [active]);
 
   /**
    * URL → state(上一頁 / 下一頁)。只在 URL 的 repo 與目前 repo 相同時才接手 ——
-   * 跨 repo 的 popstate 由 App 切 repo,接著 Chat 的 repo effect 會重置狀態。
-   * 比對 activeRef 式的最新值用 ref,避免 handler 綁到過期的 active。
+   * 跨 repo 的 popstate 由 App 切 repo,接著這裡的 repo effect 會重置狀態。
+   * 比最新值用 ref,避免 handler 綁到過期的 active。
    */
   const activeThreadRef = useRef(active);
   useEffect(() => {
@@ -152,74 +275,87 @@ export default function Chat({ repo, isActive }: Props) {
   useEffect(() => {
     const onPop = () => {
       if (repoFromUrl() !== repo) return; // 換 repo → 交給 repo effect
+      setHighlight(turnFromUrl());
       const want = threadFromUrl() ?? 'default';
       if (want === activeThreadRef.current) return;
-      void openThread(want);
+      void openRef.current(want);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo]);
 
-  /** 開某 thread。push=true(使用者從列表點選)→ 在歷史留一筆,上一頁可回前一個 thread。 */
-  const openThread = async (name: string, push = false) => {
-    if (push) writeThreadUrl(name, true);
-    setActive(name);
-    setActiveTitle(threads.find((t) => t.name === name)?.title ?? null);
-    setErr(null);
-    try {
-      const r = await api.thread(repo, name);
-      const parsed = parseThread(r.content);
-      setTurns(parsed);
-      // 檔尾是 Human turn → 那輪的 assistant 還沒寫檔(後端仍在跑:重整過、或在這個
-      // thread 送出後切走了)→ 開輪詢等它寫檔。切走那輪的逐字輸出收不回來(SSE 的
-      // delta 只在該 thread 仍 active 時才寫畫面),但整段回覆會由輪詢補上。
-      setPendingReply(parsed.length > 0 && parsed[parsed.length - 1].role === 'human');
-    } catch {
-      setTurns([]); // 新 thread
-      setPendingReply(false);
-    }
-  };
-
+  // 新訊息 → 捲到底。deep-link `?turn=` 指定某一則時不搶,交給下面那個 effect。
   useEffect(() => {
+    if (highlight != null) return;
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [turns]);
+  }, [turns, highlight]);
+
+  // deep-link:捲到 `?turn=N` 那一則。渲染完才捲(等 markdown 撐開高度)。
+  useEffect(() => {
+    if (highlight == null || turns.length === 0) return;
+    const t = window.setTimeout(() => {
+      document.getElementById(`ph-turn-${highlight}`)?.scrollIntoView({ block: 'center' });
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [highlight, turns.length]);
 
   /**
-   * 等「reload 前送出、後端仍在跑」那輪的回覆:每 POLL_MS 重讀 thread 檔,
-   * 等到 assistant turn 出現(= 後端 append 完)就停。SSE 已隨 reload 斷掉,無法重新
-   * attach(那是厚的那層),故退而輪詢檔案 —— 使用者不必自己一直按重整。
-   * 上限 POLL_MAX 次;逾時就停(留提示讓使用者自己重讀)。
+   * 跑著的那輪:每 POLL_MS 重讀對話檔 + 問一次 job。
+   * 為什麼要輪詢:SSE 連線隨 reload / 關分頁斷掉,但後端那趟 claude -p 還在跑、跑完照樣
+   * append 到檔案。重新 attach 串流(回看逐字輸出)要後端緩衝輸出,那是厚的那層,沒做。
+   * 本畫面自己在串流時不輪詢(SSE 已經在餵畫面)。
    */
+  const watching = !streaming && (job !== null || pendingReply);
   useEffect(() => {
-    if (!pendingReply) return; // 本畫面在串流時 send() 已把它設成 false
+    if (!watching) return;
     let tries = 0;
     let stopped = false;
     const timer = setInterval(() => {
       if (stopped) return;
       tries += 1;
-      api
-        .thread(repo, active)
-        .then((r) => {
-          const parsed = parseThread(r.content);
-          if (parsed.length && parsed[parsed.length - 1].role === 'assistant') {
-            setTurns(parsed);
+      void (async () => {
+        try {
+          const [{ content }, { job: j }] = await Promise.all([
+            api.thread(repo, active),
+            api.chatJob(repo, active).catch(() => ({ job: null as ChatJob | null })),
+          ]);
+          if (stopped) return;
+          const parsed = parseThread(content);
+          setTurns(parsed);
+          setJob(j);
+          const done = parsed.length > 0 && parsed[parsed.length - 1].role === 'assistant';
+          if (!j && done) {
             setPendingReply(false);
             loadThreads(); // 後端可能也在這輪之後自動命名了
-          } else if (tries >= POLL_MAX) {
+          } else if (!j && tries >= POLL_MAX) {
             setPendingReply(false);
           }
-        })
-        .catch(() => {
+        } catch {
           if (tries >= POLL_MAX) setPendingReply(false);
-        });
+        }
+      })();
     }, POLL_MS);
     return () => {
       stopped = true;
       clearInterval(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingReply, repo, active]);
+  }, [watching, repo, active, loadThreads]);
+
+  // 打字就存草稿(debounce 400ms)。刻意做在 onChange 而非 useEffect —— 見檔頭第 4 點。
+  const saveTimer = useRef<number | undefined>(undefined);
+  const onInput = useCallback(
+    (next: string | ((prev: string) => string)) => {
+      setInput((prev) => {
+        const v = typeof next === 'function' ? next(prev) : next;
+        window.clearTimeout(saveTimer.current);
+        const key = draftKey(repo, activeThreadRef.current);
+        saveTimer.current = window.setTimeout(() => saveDraft(key, v), 400);
+        return v;
+      });
+    },
+    [repo],
+  );
+  useEffect(() => () => window.clearTimeout(saveTimer.current), []);
 
   // ContentPick 挑到的內容 → 以引用塊附進輸入框(Cursor 式 mention)。只有 active 時收。
   useEffect(() => {
@@ -232,40 +368,74 @@ export default function Chat({ repo, isActive }: Props) {
         .split('\n')
         .map((l) => '> ' + l)
         .join('\n');
-      setInput((prev) => (prev ? `${prev.replace(/\s*$/, '')}\n\n${quoted}\n\n` : `${quoted}\n\n`));
+      onInput((prev) => (prev ? `${prev.replace(/\s*$/, '')}\n\n${quoted}\n\n` : `${quoted}\n\n`));
     };
     window.addEventListener('porthole:mention', onMention);
     return () => window.removeEventListener('porthole:mention', onMention);
-  }, []);
+  }, [onInput]);
+
+  // thread 改名:有檔(已對話過)→ 後端 fs.rename;無檔(空 thread)→ 本地改名,下次訊息寫新檔。
+  const doRename = async () => {
+    const to = renameVal.trim();
+    if (!to || to === active) {
+      setRenameOpen(false);
+      return;
+    }
+    try {
+      // 後端:標題寫進檔首 H1;檔名只在輸入含英數時才改(純中文 → 檔名不動);
+      // 綁檔的只換 slug 段,後綴不動。
+      const { name, title, link } = await api.renameThread(repo, active, to);
+      setActive(name);
+      setActiveTitle(title ?? null);
+      setActiveLink(link ?? null);
+      loadThreads();
+    } catch {
+      // 無檔(空 thread)→ 本地改名,下次訊息才寫檔;此時檔名仍需收斂成安全字元。
+      setActive(to.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 96) || 'default');
+      setActiveTitle(null);
+    }
+    setRenameOpen(false);
+  };
 
   const send = async () => {
     const prompt = input.trim();
     if (!prompt || streaming) return;
-    const thread = active; // 這一輪綁定的 thread:送出後使用者可能切到別的 thread
+    const thread = active; // 這一輪綁定的 thread:送出後使用者可能切到別的對話
     const firstTurn = turns.length === 0; // 首輪 → 回覆後請 agent 依主題命名
+    const link = activeLink ?? (layout === 'panel' ? (linkPath ?? null) : null);
     setInput('');
+    clearDraft(draftKey(repo, thread));
     setErr(null);
     setPendingReply(false); // 這輪有自己的 SSE,輪詢交棒給 streaming
-    setTurns((t) => [...t, { role: 'human', text: prompt }, { role: 'assistant', text: '' }]);
+    setJob(null);
+    setHighlight(null);
+    const at = new Date().toISOString();
+    setTurns((t) => [...t, { role: 'human', text: prompt, at }, { role: 'assistant', text: '', at }]);
     setStreamingThreads((s) => new Set(s).add(thread));
     try {
       const r = await fetch(`/api/${repo}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ thread, prompt }),
+        body: JSON.stringify({
+          thread,
+          prompt,
+          link: link ?? undefined,
+          model: model || undefined,
+          effort: effort || undefined,
+        }),
       });
       if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
       await readSse(r.body, (event, data) => {
         if (event === 'delta') {
-          // 只在這輪的 thread 仍是 active 時寫畫面 —— 否則會把這個 thread 的回覆
-          // 逐字接到使用者已切過去的另一個 thread 上。切走後照收不寫,回來由輪詢補。
+          // 只在這輪的 thread 仍是 active 時寫畫面 —— 否則會把這條的回覆逐字接到
+          // 使用者已切過去的另一條上。切走後照收不寫,回來由輪詢補。
           if (activeThreadRef.current !== thread) return;
           const text = (data as { text: string }).text;
           setTurns((t) => {
             const copy = [...t];
             const last = copy[copy.length - 1];
             if (!last || last.role !== 'assistant') return t; // 畫面已換過 → 不亂接
-            copy[copy.length - 1] = { role: 'assistant', text: last.text + text };
+            copy[copy.length - 1] = { ...last, text: last.text + text };
             return copy;
           });
         } else if (event === 'stderr') {
@@ -274,14 +444,15 @@ export default function Chat({ repo, isActive }: Props) {
           console.warn('[claude stderr]', (data as { text: string }).text);
         }
       });
-      // 首輪結束且 thread 仍是自動名 → 讓 agent 依主題改名
-      if (firstTurn && /^thread-\d+$/.test(thread)) {
+      // 首輪結束且還是自動名(`thread-<ts>` / 綁檔的 `chat-…`)→ 讓 agent 依主題改名
+      if (firstTurn && (/^thread-\d+$/.test(thread) || thread.startsWith('chat-'))) {
         try {
-          const { name, title } = await api.renameThread(repo, thread);
-          // 使用者已切去別的 thread → 只更新列表,不把他拉回來
+          const { name, title, link: lk } = await api.renameThread(repo, thread);
+          // 使用者已切去別的對話 → 只更新列表,不把他拉回來
           if (activeThreadRef.current === thread) {
             if (name !== thread) setActive(name);
             setActiveTitle(title ?? null);
+            setActiveLink(lk ?? null);
           }
         } catch {
           /* 命名失敗不影響對話 */
@@ -299,20 +470,48 @@ export default function Chat({ repo, isActive }: Props) {
     }
   };
 
+  /** 中斷:停掉後端那支 claude -p(已寫出的 turn 不回捲)。 */
+  const stop = async () => {
+    try {
+      await api.cancelChat(repo, active);
+      setJob(null);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+
   const newThread = () => {
     const name = `thread-${Date.now()}`;
     writeThreadUrl(name, true); // 開新對話也留一筆歷史
     setActive(name);
     setActiveTitle(null);
+    setActiveLink(null); // 「新對話」= 不綁檔(行為同舊版)
     setTurns([]);
     setPendingReply(false);
+    setJob(null);
+    setInput('');
     setListOpen(false);
   };
 
-  const threadList = (
-    <div style={{ width: 240, maxHeight: 360, overflow: 'auto' }} data-loc="chat:list">
-      <Button block onClick={newThread} style={{ marginBottom: 8 }} data-loc="chat:thread:new">
-        + 新對話
+  /** 複製某一則的 deep-link(`?thread=…&turn=N`,保留模式 hash)。 */
+  const copyTurnLink = (n: number) => {
+    const params = new URLSearchParams(location.search);
+    if (active && active !== 'default') params.set('thread', active);
+    params.set('turn', String(n));
+    copyText(`${location.origin}${location.pathname}?${params.toString()}${location.hash}`);
+  };
+
+  /** 點綁的檔 → 切到檔案模式並開那個檔(交給 App / Explore 接手)。 */
+  const openLinked = (rel: string) => {
+    window.dispatchEvent(
+      new CustomEvent('porthole:navigate', { detail: { repo, path: rel, tab: 'file' } }),
+    );
+  };
+
+  const threadRows = (
+    <>
+      <Button block icon={<PlusOutlined />} onClick={newThread} style={{ marginBottom: 8 }} data-loc="chat:thread:new">
+        新對話
       </Button>
       <List
         size="small"
@@ -321,57 +520,117 @@ export default function Chat({ repo, isActive }: Props) {
         renderItem={(t) => (
           <List.Item
             onClick={() => {
-              void openThread(t.name, true); // 使用者主動切 → 留歷史,上一頁可回上一個 thread
+              void openThread(t.name, true); // 使用者主動切 → 留歷史,上一頁可回上一條
               setListOpen(false);
             }}
             style={{
               cursor: 'pointer',
-              background: t.name === active ? '#e6f4ff' : undefined,
+              background: t.name === active ? 'var(--accent-soft)' : undefined,
               padding: '6px 8px',
-              borderRadius: 4,
+              borderRadius: 6,
+              display: 'block',
             }}
+            data-loc="chat:thread:item"
           >
-            <Typography.Text ellipsis title={t.name} style={{ flex: 1, minWidth: 0 }}>
-              {t.title || t.name}
-            </Typography.Text>
-            {/* 多開時標出哪個 thread 還在跑(送出後切去別的 thread 也看得到) */}
-            {streamingThreads.has(t.name) && <Spin size="small" data-loc="chat:thread:running" />}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Typography.Text ellipsis title={t.name} style={{ flex: 1, minWidth: 0 }}>
+                {t.title || t.name}
+              </Typography.Text>
+              {/* 多開時標出哪條還在跑(送出後切去別的對話也看得到) */}
+              {streamingThreads.has(t.name) && <Spin size="small" data-loc="chat:thread:running" />}
+            </div>
+            {t.link && (
+              <Typography.Text
+                type="secondary"
+                ellipsis
+                style={{ fontSize: 11 }}
+                title={`綁著 ${t.link}`}
+              >
+                <FileTextOutlined /> {t.link}
+              </Typography.Text>
+            )}
           </List.Item>
         )}
       />
+    </>
+  );
+
+  const cfg = (
+    <div style={{ width: 220 }} data-loc="chat:cfg">
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        留「預設」就用 claude CLI 自己的設定
+      </Typography.Text>
+      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <Select
+          value={model}
+          onChange={(v) => {
+            setModel(v);
+            writeModel(v);
+          }}
+          options={[
+            { value: '', label: 'model:預設' },
+            ...(engine?.models ?? []).map((m) => ({ value: m, label: `model:${m}` })),
+          ]}
+          data-loc="chat:cfg:model"
+        />
+        <Select
+          value={effort}
+          onChange={(v) => {
+            setEffort(v);
+            writeEffort(v);
+          }}
+          options={[
+            { value: '', label: 'effort:預設' },
+            ...(engine?.efforts ?? []).map((x) => ({ value: x, label: `effort:${x}` })),
+          ]}
+          data-loc="chat:cfg:effort"
+        />
+      </div>
     </div>
   );
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }} data-loc="chat:root">
+  const conversation = (
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 8,
           padding: '8px 12px',
-          borderBottom: '1px solid #f0f0f0',
+          borderBottom: '1px solid var(--line)',
         }}
         data-loc="chat:topbar"
       >
-        <Popover
-          trigger="click"
-          open={listOpen}
-          onOpenChange={setListOpen}
-          content={threadList}
-          placement="bottomLeft"
-        >
-          <Button icon={<UnorderedListOutlined />} data-loc="chat:list:toggle">
-            List
-          </Button>
-        </Popover>
-        <Typography.Text ellipsis style={{ flex: 1, minWidth: 0 }} title={active}>
-          {activeTitle || active}
-        </Typography.Text>
+        {layout === 'panel' && (
+          <Popover
+            trigger="click"
+            open={listOpen}
+            onOpenChange={setListOpen}
+            content={<div style={{ width: 260, maxHeight: 380, overflow: 'auto' }} data-loc="chat:list">{threadRows}</div>}
+            placement="bottomLeft"
+          >
+            <Button icon={<UnorderedListOutlined />} data-loc="chat:list:toggle" />
+          </Popover>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Typography.Text ellipsis style={{ display: 'block' }} title={active}>
+            {activeTitle || active}
+          </Typography.Text>
+          {activeLink && (
+            <span
+              className="ph-chat-link"
+              title={`這條對話綁著 ${activeLink}(點開那個檔)`}
+              onClick={() => openLinked(activeLink)}
+              data-loc="chat:link"
+            >
+              <FileTextOutlined /> {activeLink}
+            </span>
+          )}
+        </div>
         <Button
           size="small"
           icon={<EditOutlined />}
-          title="重新命名此 thread"
+          title="重新命名這條對話"
           onClick={() => {
             setRenameVal(activeTitle || active);
             setRenameOpen(true);
@@ -380,8 +639,134 @@ export default function Chat({ repo, isActive }: Props) {
         />
       </div>
 
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 12 }} data-loc="chat:messages">
+        {err && <Alert type="error" message={err} closable onClose={() => setErr(null)} style={{ marginBottom: 8 }} />}
+        {(job || pendingReply) && !streaming && (
+          <Alert
+            type="info"
+            showIcon
+            icon={<Spin size="small" />}
+            message={
+              job
+                ? `這輪仍在後端執行(${new Date(job.startedAt).toLocaleTimeString()} 起${
+                    [job.model, job.effort].filter(Boolean).join(' · ')
+                      ? `,${[job.model, job.effort].filter(Boolean).join(' · ')}`
+                      : ''
+                  })—— 回覆寫進檔案就會自動出現`
+                : '這輪可能仍在後端執行(重整過頁面,或切去了別的對話)—— 回覆寫進檔案就會自動出現'
+            }
+            action={
+              <>
+                <Button size="small" icon={<ReloadOutlined />} onClick={() => void openThread(active)} data-loc="chat:pending:reload">
+                  重讀
+                </Button>
+                {job && (
+                  <Button size="small" danger icon={<StopOutlined />} onClick={() => void stop()} data-loc="chat:pending:stop">
+                    中斷
+                  </Button>
+                )}
+              </>
+            }
+            style={{ marginBottom: 8 }}
+            data-loc="chat:pending"
+          />
+        )}
+        {turns.length === 0 && !job && (
+          <Typography.Text type="secondary">
+            {activeLink
+              ? `這條對話綁著 ${activeLink};送出後寫進 ${repo}/doc/chat/${active}.md`
+              : `對話寫進 ${repo}/doc/chat/${active}.md`}
+          </Typography.Text>
+        )}
+        <ul className="ph-chat-list">
+          {turns.map((turn, i) => (
+            <li
+              key={i}
+              id={`ph-turn-${i + 1}`}
+              className={`ph-turn${highlight === i + 1 ? ' target' : ''}`}
+              data-loc="chat:turn"
+            >
+              <div className="ph-turn-head">
+                <span className="ph-turn-who">{turn.role === 'human' ? '@you' : `@${repo}`}</span>
+                <span className="ph-turn-at">{fmtAt(turn.at)}</span>
+                <span className="spacer" />
+                <button
+                  type="button"
+                  className="ph-turn-link"
+                  title="複製這一則的連結"
+                  onClick={() => copyTurnLink(i + 1)}
+                  data-loc="chat:turn:link"
+                >
+                  🔗
+                </button>
+              </div>
+              <div className="md-preview">
+                {turn.text ? <Markdown>{turn.text}</Markdown> : <Spin size="small" />}
+              </div>
+            </li>
+          ))}
+        </ul>
+        <div ref={bottomRef} />
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--line)', padding: 12 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <MentionTextArea
+              repo={repo}
+              value={input}
+              onChange={onInput}
+              onSubmit={() => void send()}
+              placeholder={`對 ${repo} 的 agent 說…（@ 提及檔案,⌘/Ctrl+Enter 送出,Enter 換行)`}
+              disabled={streaming}
+            />
+          </div>
+          <Popover trigger="click" open={cfgOpen} onOpenChange={setCfgOpen} content={cfg} placement="topRight">
+            <Button
+              icon={<SettingOutlined />}
+              type={model || effort ? 'primary' : 'default'}
+              ghost={!!(model || effort)}
+              title={`model / effort(目前:${[model || '預設', effort || '預設'].join(' · ')})`}
+              data-loc="chat:cfg:toggle"
+            />
+          </Popover>
+          {streaming || job ? (
+            <Tooltip title="中斷這輪(已寫出的紀錄不回捲)">
+              <Button danger icon={<StopOutlined />} onClick={() => void stop()} data-loc="chat:composer:stop">
+                中斷
+              </Button>
+            </Tooltip>
+          ) : (
+            <Button type="primary" icon={<SendOutlined />} onClick={() => void send()} data-loc="chat:composer:send">
+              送出
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', height: '100%', minHeight: 0 }} data-loc="chat:root">
+      {layout === 'full' && (
+        <div
+          style={{
+            width: 280,
+            flexShrink: 0,
+            borderRight: '1px solid var(--line)',
+            background: 'var(--surface)',
+            overflow: 'auto',
+            padding: 8,
+          }}
+          data-loc="chat:list"
+        >
+          {threadRows}
+        </div>
+      )}
+      {conversation}
+
       <Modal
-        title="重新命名 thread"
+        title="重新命名這條對話"
         open={renameOpen}
         onOk={doRename}
         onCancel={() => setRenameOpen(false)}
@@ -390,9 +775,11 @@ export default function Chat({ repo, isActive }: Props) {
         okButtonProps={{ disabled: !renameVal.trim() }}
       >
         <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-          這裡改的是<Typography.Text strong>顯示標題</Typography.Text>(可用中文),寫進 <Typography.Text code>doc/chat/{active}.md</Typography.Text>{' '}
-          的第一行 <Typography.Text code># 標題</Typography.Text>。輸入含英文字母 / 數字時,檔名也會一起改成
+          這裡改的是<Typography.Text strong>顯示標題</Typography.Text>(可用中文),寫進{' '}
+          <Typography.Text code>doc/chat/{active}.md</Typography.Text> 的第一行{' '}
+          <Typography.Text code># 標題</Typography.Text>。輸入含英文字母 / 數字時,檔名也會一起改成
           對應 slug;純中文則只改標題、檔名不動。
+          {activeLink && '綁檔的對話只換檔名前段,後綴(檔名 + 資料夾雜湊)不動。'}
         </Typography.Paragraph>
         <Input
           autoFocus
@@ -403,62 +790,6 @@ export default function Chat({ repo, isActive }: Props) {
           data-loc="chat:rename:input"
         />
       </Modal>
-
-      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16 }} data-loc="chat:messages">
-          {err && <Alert type="error" message={err} style={{ marginBottom: 8 }} />}
-          {pendingReply && (
-            <Alert
-              type="info"
-              showIcon
-              icon={<Spin size="small" />}
-              message="這一輪仍在後端執行(送出後重整過頁面,或切去了別的對話)—— 回覆寫進檔案就會自動出現"
-              action={
-                <Button size="small" onClick={() => void openThread(active)} data-loc="chat:pending:reload">
-                  立即重讀
-                </Button>
-              }
-              style={{ marginBottom: 8 }}
-              data-loc="chat:pending"
-            />
-          )}
-          {turns.length === 0 && (
-            <Typography.Text type="secondary">
-              對話寫進 {repo}/doc/chat/{active}.md
-            </Typography.Text>
-          )}
-          {turns.map((turn, i) => (
-            <div key={i} style={{ marginBottom: 16 }}>
-              <Typography.Text strong>{turn.role === 'human' ? '🧑 你' : '🤖 agent'}</Typography.Text>
-              <div className="md-preview" style={{ marginTop: 4 }}>
-                {turn.text ? <Markdown>{turn.text}</Markdown> : <Spin size="small" />}
-              </div>
-            </div>
-          ))}
-          <div ref={bottomRef} />
-        </div>
-
-        <div style={{ borderTop: '1px solid #f0f0f0', padding: 12 }}>
-          <Space.Compact style={{ width: '100%' }}>
-            <MentionTextArea
-              repo={repo}
-              value={input}
-              onChange={setInput}
-              onSubmit={() => void send()}
-              placeholder={`對 ${repo} 的 agent 說…（@ 提及檔案,⌘/Ctrl+Enter 送出,Enter 換行)`}
-              disabled={streaming}
-            />
-            <Button
-              type="primary"
-              loading={streaming}
-              onClick={() => void send()}
-              data-loc="chat:composer:send"
-            >
-              送出
-            </Button>
-          </Space.Compact>
-        </div>
-      </div>
     </div>
   );
 }
@@ -496,22 +827,28 @@ async function readSse(
   }
 }
 
-/** 把 doc/chat/<thread>.md 解析回 turns。格式:## 🧑 Human · / ## 🤖 Assistant · */
+/** 檔內的 `<!-- porthole:link <rel> -->` → 綁的檔;沒有則 null(同後端 chat-link.readLink)。 */
+function parseLink(md: string): string | null {
+  const m = /<!--\s*porthole:link\s+(\S[^>]*?)\s*-->/.exec(md);
+  return m ? m[1].trim() : null;
+}
+
+/** 把 doc/chat/<thread>.md 解析回 turns。格式:## 🧑 Human · <ISO> / ## 🤖 Assistant · <ISO> */
 function parseThread(md: string): Turn[] {
   const turns: Turn[] = [];
   const parts = md.split(/\n## (?=🧑 Human|🤖 Assistant)/);
   for (const part of parts) {
     const trimmed = part.replace(/^## /, '');
-    if (trimmed.startsWith('🧑 Human')) {
-      turns.push({ role: 'human', text: stripHeader(trimmed) });
-    } else if (trimmed.startsWith('🤖 Assistant')) {
-      turns.push({ role: 'assistant', text: stripHeader(trimmed) });
-    }
+    const role = trimmed.startsWith('🧑 Human')
+      ? ('human' as const)
+      : trimmed.startsWith('🤖 Assistant')
+        ? ('assistant' as const)
+        : null;
+    if (!role) continue;
+    const nl = trimmed.indexOf('\n');
+    const head = nl === -1 ? trimmed : trimmed.slice(0, nl);
+    const at = /·\s*(\S+)\s*$/.exec(head)?.[1] ?? '';
+    turns.push({ role, text: nl === -1 ? '' : trimmed.slice(nl + 1).trim(), at });
   }
   return turns;
-}
-
-function stripHeader(block: string): string {
-  const nl = block.indexOf('\n');
-  return nl === -1 ? '' : block.slice(nl + 1).trim();
 }

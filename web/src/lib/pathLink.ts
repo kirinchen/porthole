@@ -7,18 +7,25 @@
  *  - 站內絕對路徑 `/<repo>/<path>#<tab>` → internal。
  *  - 相對路徑(含 `.` / `..`,以「目前檔案所在目錄」為基準)→ internal(同 repo)。
  *  - 純錨點 `#tab` → internal(同檔,只帶 tab)。
- *  tab 只認 explore/chat/session/cli,其餘 hash 視為無 tab。
+ *  hash 認得的模式只有 file/chat(SPEC §3);文件裡既有的 `#explore` / `#session` / `#cli`
+ *  仍要**認得**並正規化成 `file` —— 不認的話會被當成章節錨點 slug,舊連結就壞了。
  *  目標是檔案或資料夾由呼叫端(Explore)實際嘗試開啟時判定;本檔只負責解析路徑。
  */
 export type LinkTarget =
   | { kind: 'external'; url: string }
   | { kind: 'internal'; repo: string; path: string; tab?: string; section?: string };
 
-const TABS = ['explore', 'chat', 'session', 'cli'];
+/** 現行模式 + 已退場 / 改名的舊 hash(只用於辨識,輸出一律正規化)。 */
+const TABS = ['file', 'chat', 'explore', 'session', 'cli'];
+
+/** 舊 hash → 現行模式。 */
+function normalizeTab(h: string): string {
+  return h === 'chat' ? 'chat' : 'file';
+}
 
 function tabFromHash(hash: string): string | undefined {
   const h = safeDecode(hash.replace(/^#/, '')); // safeDecode:孤立 `%` 等壞編碼不炸掉整個預覽
-  return TABS.includes(h) ? h : undefined;
+  return TABS.includes(h) ? normalizeTab(h) : undefined;
 }
 
 /** hash 非 tab(explore/chat/…)時,視為章節錨點 slug(GitHub 式 `#標題`)。 */

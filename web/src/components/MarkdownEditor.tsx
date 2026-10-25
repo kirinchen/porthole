@@ -23,7 +23,8 @@ import {
 } from '@codemirror/view';
 import { EditorState, StateField, type Range } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
-import { syntaxTree, ensureSyntaxTree, syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language';
+import { syntaxTree, ensureSyntaxTree, syntaxHighlighting } from '@codemirror/language';
+import { darkHighlightStyle } from '../lib/cmTheme';
 import { markdown } from '@codemirror/lang-markdown';
 import { Table } from '@lezer/markdown';
 import { CODE_LANGUAGES } from '../lib/codeLanguages';
@@ -396,7 +397,7 @@ function showFlowMenu(x: number, y: number, onPick: (code: string) => void, onIm
   const menu = document.createElement('div');
   menu.setAttribute('data-loc', 'explore:edit:flowmenu');
   menu.style.cssText =
-    'position:fixed;z-index:1500;background:#fff;border:1px solid #d9d9d9;border-radius:6px;' +
+    'position:fixed;z-index:1500;background:var(--card);border:1px solid var(--line);border-radius:6px;' +
     'box-shadow:0 2px 8px rgba(0,0,0,.15);padding:4px;font-size:13px;' +
     'max-height:calc(100vh - 16px);overflow-y:auto;' +
     `left:${x}px;top:${y}px;`;
@@ -406,7 +407,7 @@ function showFlowMenu(x: number, y: number, onPick: (code: string) => void, onIm
     item.textContent = label;
     item.style.cssText = 'padding:6px 12px;cursor:pointer;border-radius:4px;white-space:nowrap;';
     if (loc) item.setAttribute('data-loc', loc);
-    item.onmouseenter = () => (item.style.background = '#f0f0f0');
+    item.onmouseenter = () => (item.style.background = 'rgba(255,255,255,0.08)');
     item.onmouseleave = () => (item.style.background = '');
     item.addEventListener('mousedown', (e) => {
       e.preventDefault();
@@ -419,7 +420,7 @@ function showFlowMenu(x: number, y: number, onPick: (code: string) => void, onIm
   addItem('🖼 插入圖片', onImage, 'explore:edit:flowmenu:image');
   const head = document.createElement('div');
   head.textContent = '插入圖表(GUI 可編輯)';
-  head.style.cssText = 'padding:4px 12px 4px;color:#999;font-size:11px;border-top:1px solid #f0f0f0;margin-top:2px;';
+  head.style.cssText = 'padding:4px 12px 4px;color:var(--muted);font-size:11px;border-top:1px solid rgba(255,255,255,0.08);margin-top:2px;';
   menu.appendChild(head);
   for (const s of GUI_SAMPLES) addItem(s.label, () => onPick(s.code));
   document.body.appendChild(menu);
@@ -569,7 +570,7 @@ function sectionSlugForLine(state: EditorState, lineNumber: number): string | nu
 
 /** 複製章節 deep-link(`?sec=<slug>`,保留 #tab);格式對齊預覽的 jumpAndCopySection。 */
 function copySectionLink(slug: string): void {
-  const rel = `${location.pathname}?sec=${encodeURIComponent(slug)}${location.hash || '#explore'}`;
+  const rel = `${location.pathname}?sec=${encodeURIComponent(slug)}${location.hash || '#file'}`;
   const full = location.origin + rel;
   copyText(full).then((ok) => (ok ? message.success('已複製章節連結') : message.info('複製連結失敗')));
 }
@@ -616,13 +617,13 @@ function showHeadingTip(view: EditorView, lineFrom: number, lineNumber: number, 
   tip.innerHTML = LINK_ICON_SVG;
   tip.style.cssText =
     'position:fixed;z-index:1500;display:inline-flex;align-items:center;cursor:pointer;' +
-    'color:#8c8c8c;font-size:14px;line-height:1;padding:2px;';
+    'color:var(--muted);font-size:14px;line-height:1;padding:2px;';
   tip.onmouseenter = () => {
     cancelHoverHide();
-    tip.style.color = '#1677ff';
+    tip.style.color = 'var(--accent)';
   };
   tip.onmouseleave = () => {
-    tip.style.color = '#8c8c8c';
+    tip.style.color = 'var(--muted)';
     closeHeadingTip();
   };
   tip.addEventListener('mousedown', (e) => {
@@ -818,8 +819,25 @@ const livePreview = ViewPlugin.fromClass(
 );
 
 const theme = EditorView.theme({
-  '&': { height: '100%', fontSize: '14px', backgroundColor: '#fff' },
+  '&': {
+    height: '100%',
+    fontSize: '14px',
+    backgroundColor: 'var(--bg)',
+    color: 'var(--text)',
+  },
   '&.cm-focused': { outline: 'none' },
+  // 深色底下必須明寫游標 / 選取色 —— CM6 預設是亮底配色(黑游標、淺藍選取),會看不見。
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)' },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
+    backgroundColor: 'var(--accent-soft)',
+  },
+  '.cm-activeLine': { backgroundColor: 'rgba(255,255,255,0.03)' },
+  '.cm-gutters': {
+    backgroundColor: 'var(--surface)',
+    color: 'var(--muted)',
+    borderRight: '1px solid var(--line)',
+  },
+  '.cm-activeLineGutter': { backgroundColor: 'var(--accent-faint)' },
   '.cm-scroller': {
     fontFamily:
       "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif",
@@ -833,18 +851,18 @@ const theme = EditorView.theme({
   '.cm-h3': { fontSize: '1.27em', fontWeight: '700' },
   '.cm-h4': { fontSize: '1.12em', fontWeight: '700' },
   '.cm-h5': { fontWeight: '700' },
-  '.cm-h6': { fontWeight: '700', color: '#8c8c8c' },
+  '.cm-h6': { fontWeight: '700', color: 'var(--muted)' },
   '.cm-strong': { fontWeight: '700' },
   '.cm-em': { fontStyle: 'italic' },
   '.cm-code': {
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-    background: '#f2f2f3',
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    background: 'var(--surface)',
     borderRadius: '4px',
     padding: '0.1em 0.35em',
     fontSize: '0.92em',
   },
-  '.cm-link': { color: '#1677ff', textDecoration: 'underline', cursor: 'pointer' },
-  '.cm-quote': { borderLeft: '3px solid #d9d9d9', paddingLeft: '12px', color: '#666' },
+  '.cm-link': { color: 'var(--accent)', textDecoration: 'underline', cursor: 'pointer' },
+  '.cm-quote': { borderLeft: '3px solid var(--line)', paddingLeft: '12px', color: 'var(--muted)' },
 });
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function MarkdownEditor(
@@ -922,7 +940,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function Markdown
           // Table 擴充:讓 GFM 表格進語法樹 → 由 TableWidget 取代成 GUI 編輯器。
           markdown({ extensions: [Table], codeLanguages: CODE_LANGUAGES }),
           // fenced code 語法上色:把 lezer highlight tags 轉成帶色 class(fallback 不蓋 livePreview 樣式)。
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          syntaxHighlighting(darkHighlightStyle, { fallback: true }),
           // @ 選檔 / # 選章節 自動完成(可混用 @file#section)
           autocompletion({ override: [mentionCompletionSource], icons: false }),
           EditorView.lineWrapping,

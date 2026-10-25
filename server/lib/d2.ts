@@ -33,7 +33,9 @@ export function renderD2(src: string): Promise<string> {
     let child;
     try {
       // '-' '-' = stdin → stdout。--no-xml-tag 省略 <?xml ...?> 方便直接內嵌。
-      child = spawn(D2_BIN, ['--no-xml-tag', '-', '-'], {
+      // --theme=200(Dark Mauve):porthole 本身深色底(SPEC §3.1)。不用 `--dark-theme`
+      // —— 那個是「瀏覽器 prefers-color-scheme 為深色時才套」,使用者系統設亮色就會出白圖。
+      child = spawn(D2_BIN, ['--no-xml-tag', '--theme=200', '-', '-'], {
         env: process.env,
         stdio: ['pipe', 'pipe', 'pipe'],
       });

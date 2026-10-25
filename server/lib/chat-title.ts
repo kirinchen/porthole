@@ -10,9 +10,12 @@
  * 容易寫錯,故抽出來測。
  */
 
-/** thread 名收斂成安全檔名(再交 path-guard 二次把關)。 */
+/**
+ * thread 名收斂成安全檔名(再交 path-guard 二次把關)。
+ * 上限 96:綁檔對話的名字是 `<slug>-<file>-<hex12>`(SPEC §4.2.1),64 會把後綴切掉。
+ */
 export function safeThread(name: string): string {
-  const s = String(name).replace(/[^A-Za-z0-9_\-]/g, '_').slice(0, 64);
+  const s = String(name).replace(/[^A-Za-z0-9_\-]/g, '_').slice(0, 96);
   return s || 'default';
 }
 

@@ -15,12 +15,24 @@ export interface ClaudeRun {
   abort: () => void;
 }
 
+/**
+ * `claude` 吃的 model / effort 白名單(見 `claude --help`)。
+ * 走白名單而不是原樣轉送:argv 不經 shell 已擋掉注入,但也不該把任意字串當 flag 丟給 CLI
+ * (打錯一個值整趟就起不來)。前端的 ⚙ 下拉直接讀 `GET /api/chat/engine` 拿這兩張表。
+ */
+export const MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const;
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+
 export interface RunOpts {
   /**
    * YOLO:加 --dangerously-skip-permissions,讓 agent 能無提示執行工具
    * (讀寫檔、跑指令…)。安全邊界靠 CWD 的 path-guard(已鎖在 basePath 內),不靠 prompt。
    */
   yolo?: boolean;
+  /** `--model`(留空 = 用 CLI 自己的預設)。值須在 MODELS 內,呼叫端負責驗。 */
+  model?: string;
+  /** `--effort`。值須在 EFFORTS 內。 */
+  effort?: string;
 }
 
 /**
@@ -34,6 +46,8 @@ export function runClaude(prompt: string, cwd: string, opts: RunOpts = {}): Clau
 
   const args = ['-p'];
   if (opts.yolo) args.push('--dangerously-skip-permissions');
+  if (opts.model) args.push('--model', opts.model);
+  if (opts.effort) args.push('--effort', opts.effort);
   args.push(prompt);
 
   const child = spawn('claude', args, {

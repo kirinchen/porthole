@@ -125,9 +125,9 @@ function MindmapNodeView({ data }: NodeProps) {
         position: 'relative',
         width: NODE_W,
         height: NODE_H,
-        border: root ? '2px solid #1677ff' : '1px solid #555',
+        border: root ? '2px solid var(--accent)' : '1px solid var(--muted)',
         borderRadius: 8,
-        background: root ? '#e6f4ff' : '#fff',
+        background: root ? 'var(--accent-soft)' : 'var(--card)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -148,7 +148,7 @@ function MindmapNodeView({ data }: NodeProps) {
           textOverflow: 'ellipsis',
         }}
       >
-        {d.text || <span style={{ color: '#aaa' }}>(空白)</span>}
+        {d.text || <span style={{ color: 'var(--muted)' }}>(空白)</span>}
       </span>
       {/* 角落小字:shape 名稱 + icon(若有)。 */}
       <span
@@ -158,7 +158,7 @@ function MindmapNodeView({ data }: NodeProps) {
           right: 6,
           fontSize: 9,
           fontWeight: 400,
-          color: '#999',
+          color: 'var(--muted)',
           pointerEvents: 'none',
           maxWidth: '90%',
           whiteSpace: 'nowrap',
@@ -169,7 +169,7 @@ function MindmapNodeView({ data }: NodeProps) {
         {d.shape !== 'default' ? d.shape : ''}
         {d.icon ? ` · ${d.icon}` : ''}
       </span>
-      <FourSideHandles color={root ? '#1677ff' : '#555'} />
+      <FourSideHandles color={root ? 'var(--accent)' : 'var(--muted)'} />
     </div>
   );
 }
@@ -521,7 +521,7 @@ export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
       <div
         style={{
           flex: 1,
-          border: '1px solid #f0f0f0',
+          border: '1px solid var(--line)',
           borderRadius: 8,
           minHeight: 0,
           outline: 'none',

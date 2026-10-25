@@ -95,7 +95,7 @@ export default function EnvView({ content }: { content: string }) {
               return (
                 <div
                   key={i}
-                  style={{ color: '#8c8c8c', fontStyle: 'italic', fontSize: 12, padding: '2px 0' }}
+                  style={{ color: 'var(--muted)', fontStyle: 'italic', fontSize: 12, padding: '2px 0' }}
                   data-loc="env:comment"
                 >
                   {l.text || ' '}
@@ -119,7 +119,7 @@ export default function EnvView({ content }: { content: string }) {
                   gap: 8,
                   padding: '4px 6px',
                   borderRadius: 6,
-                  background: i % 2 ? 'transparent' : '#fafafa',
+                  background: i % 2 ? 'transparent' : 'var(--surface)',
                 }}
                 data-loc="env:row"
               >
@@ -127,7 +127,7 @@ export default function EnvView({ content }: { content: string }) {
                   style={{
                     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                     fontWeight: 600,
-                    color: '#1677ff',
+                    color: 'var(--accent)',
                     whiteSpace: 'nowrap',
                     flexShrink: 0,
                     minWidth: 0,

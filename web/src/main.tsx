@@ -4,7 +4,11 @@ import { ConfigProvider } from 'antd';
 import App from './App';
 import DevPick from './DevPick';
 import ContentPick from './components/ContentPick';
+import { antdTheme, applyPalette } from './theme';
 import './styles.css';
+
+// 色票先寫進 :root,再 render —— 元件第一次量測時 var(--*) 就已經有值(SPEC §3.1)。
+applyPalette();
 
 // 部署後 chunk 換新 hash,舊分頁的 lazy import(MarkdownEditor / mermaid 編輯器等)會 404。
 // 偵測到動態載入失敗 → 重整抓最新 index.html(server 已對 index.html no-cache)。
@@ -41,7 +45,7 @@ setTimeout(() => {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ConfigProvider>
+    <ConfigProvider theme={antdTheme}>
       <App />
       {/* DevPick 掛根層:Ctrl+F12 元素定位器 */}
       <DevPick />

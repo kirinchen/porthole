@@ -39,7 +39,8 @@ function getMermaid(): Promise<MermaidApi> {
   if (!mermaidPromise) {
     mermaidPromise = import('mermaid').then((m) => {
       const api = m.default as unknown as MermaidApi;
-      api.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' });
+      // theme:'dark' —— porthole 本身深色底(SPEC §3.1),用 'default' 會在深色頁面裡爆出一塊白圖。
+      api.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'dark' });
       return api;
     });
   }
@@ -117,7 +118,7 @@ export default function MermaidBlock({ code, onApply, sessionKey }: Props) {
   return (
     <div
       style={{
-        border: editable ? '1px solid #f0f0f0' : undefined,
+        border: editable ? '1px solid var(--line)' : undefined,
         borderRadius: 8,
         padding: editable ? 8 : 0,
         margin: editable ? '8px 0' : 0,
@@ -149,7 +150,7 @@ export default function MermaidBlock({ code, onApply, sessionKey }: Props) {
           <pre
             style={{
               color: '#cf1322',
-              background: '#fff1f0',
+              background: 'rgba(226,114,91,0.12)',
               padding: 8,
               borderRadius: 6,
               whiteSpace: 'pre-wrap',
@@ -243,7 +244,7 @@ export default function MermaidBlock({ code, onApply, sessionKey }: Props) {
                 position: 'fixed',
                 inset: 0,
                 zIndex: 900,
-                background: '#fff',
+                background: 'var(--surface)',
                 padding: 12,
                 display: 'flex',
                 flexDirection: 'column',

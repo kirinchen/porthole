@@ -139,7 +139,7 @@ function ShapeNode({ data }: NodeProps) {
         height: SHAPE_H,
         border: '1px solid #555',
         borderRadius: 6,
-        background: '#fff',
+        background: 'var(--card)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -196,7 +196,7 @@ function GroupNode({ data, selected }: NodeProps) {
         {d.label || d.localId}
       </div>
       {/* container 也能當邊端點 → 藍色把手,zIndex 高於子節點以便在邊框上仍可抓到。 */}
-      <FourSideHandles color="#1677ff" />
+      <FourSideHandles color="var(--accent)" />
     </div>
   );
 }
@@ -765,7 +765,7 @@ export default function D2Editor({ code, onSave, onClose, fill }: Props) {
       <div
         style={{
           flex: 1,
-          border: '1px solid #f0f0f0',
+          border: '1px solid var(--line)',
           borderRadius: 8,
           minHeight: 0,
           outline: 'none',

@@ -202,7 +202,7 @@ function FolderTable({ entries, onOpen }: { entries: TreeItem[]; onOpen: (p: str
       render: (_v, r) => (
         <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           {r.type === 'dir' ? (
-            <FolderOutlined style={{ color: '#1677ff', flexShrink: 0 }} />
+            <FolderOutlined style={{ color: 'var(--accent)', flexShrink: 0 }} />
           ) : (
             <FileOutlined style={{ color: '#888', flexShrink: 0 }} />
           )}
@@ -296,7 +296,7 @@ function extOptions(input: string): { value: string; label: ReactNode }[] {
       label: (
         <span style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
           <span style={{ fontFamily: 'ui-monospace, monospace' }}>.{o.ext}</span>
-          <span style={{ color: '#999', fontSize: 12 }}>{o.desc}</span>
+          <span style={{ color: 'var(--muted)', fontSize: 12 }}>{o.desc}</span>
         </span>
       ),
     }));
@@ -670,11 +670,13 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setTree((prev) => updateChildren(prev, n.key as string, children));
   };
 
-  // 把網址列同步成 /<repo>/<path>#<tab>。push=true → 新增歷史一筆(可上一頁);否則取代。
+  // 把網址列同步成 /<repo>/<path>#<mode>。push=true → 新增歷史一筆(可上一頁);否則取代。
   const writeUrl = useCallback(
     (path: string, tab?: string, push = false, section?: string) => {
-      const TABS = ['explore', 'chat', 'session', 'cli'];
-      const t = tab && TABS.includes(tab) ? tab : location.hash.replace(/^#/, '') || 'explore';
+      // 模式只有 file / chat(SPEC §3);其他值(含舊的 explore / session / cli)落回 file。
+      const MODES = ['file', 'chat'];
+      const cur = location.hash.replace(/^#/, '');
+      const t = tab && MODES.includes(tab) ? tab : MODES.includes(cur) ? cur : 'file';
       const enc = path.split('/').map(encodeURIComponent).join('/');
       // 一併帶 ?edit=1(編輯中)+ ?sec —— 否則導航重建 URL 會蓋掉 ?edit 效果加的值。
       // ?thread=(Chat tab 的 active thread)也要保留:它跟檔案路徑共用這條 URL,
@@ -682,8 +684,11 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       const params: string[] = [];
       if (section) params.push(`sec=${encodeURIComponent(section)}`);
       if (editingRef.current) params.push('edit=1');
-      const keepThread = new URLSearchParams(location.search).get('thread');
+      const q = new URLSearchParams(location.search);
+      const keepThread = q.get('thread');
       if (keepThread) params.push(`thread=${encodeURIComponent(keepThread)}`);
+      const keepTurn = q.get('turn'); // 某一則的錨點(?thread=…&turn=N 的 deep-link)
+      if (keepTurn) params.push(`turn=${encodeURIComponent(keepTurn)}`);
       const qs = params.length ? `?${params.join('&')}` : '';
       const url = `/${encodeURIComponent(repo)}/${enc}${qs}#${t}`;
       if (push && location.pathname + location.search + location.hash !== url) {
@@ -1536,7 +1541,7 @@ function HitLine({ text, col, len }: { text: string; col: number; len: number })
   return (
     <span style={{ whiteSpace: 'pre', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}>
       {before}
-      <mark style={{ background: '#fff1a8', padding: 0 }}>{hit}</mark>
+      <mark style={{ background: 'var(--hit-bg)', padding: 0 }}>{hit}</mark>
       {after}
     </span>
   );
@@ -1615,7 +1620,7 @@ function SearchPanel() {
               >
                 <FileOutlined style={{ color: '#888', flexShrink: 0 }} />
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.path}</span>
-                <span style={{ color: '#aaa', flexShrink: 0 }}>({f.matches.length})</span>
+                <span style={{ color: 'var(--muted)', flexShrink: 0 }}>({f.matches.length})</span>
               </div>
               {f.matches.map((m, i) => (
                 <div
@@ -1626,7 +1631,7 @@ function SearchPanel() {
                   data-path={f.path}
                   data-line={m.line}
                 >
-                  <span style={{ color: '#aaa', minWidth: 34, textAlign: 'right', flexShrink: 0, fontSize: 11 }}>
+                  <span style={{ color: 'var(--muted)', minWidth: 34, textAlign: 'right', flexShrink: 0, fontSize: 11 }}>
                     {m.line}
                   </span>
                   <HitLine text={m.text} col={m.col} len={m.len} />
@@ -1810,7 +1815,7 @@ export function ExploreTree() {
     <div
       style={{
         width: 40,
-        borderRight: '1px solid #f0f0f0',
+        borderRight: '1px solid var(--line)',
         padding: 4,
         display: 'flex',
         justifyContent: 'center',
@@ -1831,7 +1836,7 @@ export function ExploreTree() {
         display: 'flex',
         flexDirection: 'column',
         minHeight: 0,
-        borderRight: '1px solid #f0f0f0',
+        borderRight: '1px solid var(--line)',
         padding: 8,
       }}
       data-loc="explore:tree"
@@ -1926,7 +1931,7 @@ export function ExplorePreview() {
             alignItems: 'center',
             gap: 8,
             padding: '8px 12px',
-            borderBottom: '1px solid #f0f0f0',
+            borderBottom: '1px solid var(--line)',
           }}
           data-loc="explore:toolbar"
         >
@@ -2105,7 +2110,7 @@ export function ExplorePreview() {
                         alignItems: 'center',
                         gap: 8,
                         padding: '10px 12px',
-                        border: '1px solid #f0f0f0',
+                        border: '1px solid var(--line)',
                         borderRadius: 8,
                         cursor: 'pointer',
                         overflow: 'hidden',
@@ -2115,7 +2120,7 @@ export function ExplorePreview() {
                       {it.isLeaf ? (
                         <FileOutlined style={{ color: '#888' }} />
                       ) : (
-                        <FolderOutlined style={{ color: '#1677ff' }} />
+                        <FolderOutlined style={{ color: 'var(--accent)' }} />
                       )}
                       <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {String(it.title)}
@@ -2127,7 +2132,7 @@ export function ExplorePreview() {
             {c.folderView.readme != null && (
               <div
                 className="md-preview"
-                style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #f0f0f0' }}
+                style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--line)' }}
               >
                 <Markdown>{c.folderView.readme}</Markdown>
               </div>

@@ -220,7 +220,7 @@ function CellInput({
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             textAlign: align,
-            background: '#fff',
+            background: 'var(--card)',
             boxSizing: 'border-box',
           }}
           data-loc="table:cell:overlay"
@@ -337,11 +337,11 @@ export default function TableBlock({ code, onApply }: Props) {
       ref={rootRef}
       onBlur={onBlur}
       onKeyDown={onKeyDown}
-      style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 8, margin: '8px 0' }}
+      style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 8, margin: '8px 0' }}
       data-loc="table:block"
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ color: '#999', fontSize: 12 }}>表格</span>
+        <span style={{ color: 'var(--muted)', fontSize: 12 }}>表格</span>
         <Segmented
           size="small"
           value={mode}
@@ -362,7 +362,7 @@ export default function TableBlock({ code, onApply }: Props) {
                 {model.headers.map((h, c) => (
                   <th
                     key={c}
-                    style={{ border: '1px solid #e8e8e8', background: '#fafafa', padding: 0, minWidth: 90 }}
+                    style={{ border: '1px solid var(--line)', background: 'var(--surface)', padding: 0, minWidth: 90 }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '2px 4px' }}>
                       <Tooltip title={`對齊:${ALIGN_TITLE[model.aligns[c]]}(點擊切換)`}>
@@ -376,9 +376,9 @@ export default function TableBlock({ code, onApply }: Props) {
                           style={{
                             width: 20,
                             height: 20,
-                            border: '1px solid #d9d9d9',
+                            border: '1px solid var(--line)',
                             borderRadius: 4,
-                            background: '#fff',
+                            background: 'var(--card)',
                             cursor: 'pointer',
                             fontSize: 11,
                             lineHeight: '18px',
@@ -451,7 +451,7 @@ export default function TableBlock({ code, onApply }: Props) {
                   {row.map((cell, c) => (
                     <td
                       key={c}
-                      style={{ border: '1px solid #e8e8e8', padding: 0, minWidth: 90, verticalAlign: 'top' }}
+                      style={{ border: '1px solid var(--line)', padding: 0, minWidth: 90, verticalAlign: 'top' }}
                     >
                       <CellInput
                         value={cell}

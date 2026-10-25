@@ -112,7 +112,7 @@ function ServiceNode({ data }: NodeProps) {
         height: SVC_H,
         border: '1px solid #555',
         borderRadius: 6,
-        background: '#fff',
+        background: 'var(--card)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -221,13 +221,13 @@ function GroupNode({ data, selected }: NodeProps) {
             id={`t-${s}`}
             type="target"
             position={sidePos(s)}
-            style={{ background: '#1677ff', width: 10, height: 10, zIndex: 10 }}
+            style={{ background: 'var(--accent)', width: 10, height: 10, zIndex: 10 }}
           />
           <Handle
             id={`s-${s}`}
             type="source"
             position={sidePos(s)}
-            style={{ background: '#1677ff', width: 10, height: 10, zIndex: 10 }}
+            style={{ background: 'var(--accent)', width: 10, height: 10, zIndex: 10 }}
           />
         </span>
       ))}
@@ -870,7 +870,7 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
       <div
         style={{
           flex: 1,
-          border: '1px solid #f0f0f0',
+          border: '1px solid var(--line)',
           borderRadius: 8,
           minHeight: 0,
           outline: 'none',

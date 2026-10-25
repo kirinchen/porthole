@@ -1,3 +1,8 @@
+/* porthole 全域樣式。
+   色值一律吃 `theme.ts` 寫進 :root 的變數(--bg / --line / --accent / --tok-*),
+   這裡不硬寫色碼 —— 改色只改 theme.ts(SPEC §3.1)。
+   var() 都帶 fallback:theme.ts 還沒跑到(或 SSR / 靜態預覽)時畫面仍可讀。 */
+
 html,
 body,
 #root {
@@ -6,29 +11,58 @@ body,
 }
 
 body {
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans TC', sans-serif;
+  font-family: var(--font, system-ui, 'Noto Sans TC', sans-serif);
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--bg, #0e1a24);
+  color: var(--text, #d7e3ea);
 }
 
-/* markdown 預覽:基本排版 */
+/* ---- markdown 預覽:基本排版 ---- */
 .md-preview {
   line-height: 1.6;
   word-break: break-word;
 }
+.md-preview h1,
+.md-preview h2,
+.md-preview h3,
+.md-preview h4,
+.md-preview h5,
+.md-preview h6 {
+  color: var(--accent, #3fb6c4);
+  line-height: 1.3;
+}
+.md-preview a {
+  color: var(--accent, #3fb6c4);
+}
+.md-preview blockquote {
+  margin: 8px 0;
+  padding: 2px 12px;
+  border-left: 3px solid var(--line, #2a4452);
+  color: var(--muted, #7d97a5);
+}
+.md-preview hr {
+  border: none;
+  border-top: 1px solid var(--line, #2a4452);
+}
 .md-preview pre {
-  background: #f6f8fa;
+  background: var(--surface, #16242f);
+  border: 1px solid var(--line, #2a4452);
   padding: 12px;
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: auto;
 }
 .md-preview code {
-  background: #f0f0f0;
+  background: var(--surface, #16242f);
+  border: 1px solid var(--line, #2a4452);
   padding: 0.1em 0.3em;
-  border-radius: 3px;
+  border-radius: 4px;
+  font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.9em;
 }
 .md-preview pre code {
   background: none;
+  border: none;
   padding: 0;
 }
 /* fenced code 的複製鈕(CodeBlock):平常淡出,hover 程式碼區塊 / 聚焦(鍵盤)才明顯。
@@ -47,10 +81,10 @@ body {
   width: 26px;
   height: 26px;
   padding: 0;
-  border: 1px solid #d9d9d9;
+  border: 1px solid var(--line, #2a4452);
   border-radius: 6px;
-  background: #fff;
-  color: #666;
+  background: var(--card, #1d3340);
+  color: var(--muted, #7d97a5);
   font-size: 13px;
   cursor: pointer;
   opacity: 0;
@@ -61,8 +95,8 @@ body {
   opacity: 1;
 }
 .md-code-copy:hover {
-  color: #1677ff;
-  border-color: #1677ff;
+  color: var(--accent, #3fb6c4);
+  border-color: var(--accent, #3fb6c4);
 }
 /* 觸控裝置沒有 hover → 常駐顯示(半透明,不擋讀) */
 @media (hover: none) {
@@ -70,7 +104,9 @@ body {
     opacity: 0.55;
   }
 }
-/* fenced code 語法高亮(CodeBlock + highlightTree 產 tok-* class,色值仿 CM6 defaultHighlightStyle) */
+
+/* fenced code 語法高亮:CodeBlock + highlightTree 產 tok-* class。
+   色值 = theme.ts 的 CODE_TOKENS,與 CM6 編輯器的 darkHighlightStyle 同一份。 */
 .md-preview .tok-keyword,
 .md-preview .tok-controlKeyword,
 .md-preview .tok-operatorKeyword,
@@ -78,68 +114,73 @@ body {
 .md-preview .tok-moduleKeyword,
 .md-preview .tok-modifier,
 .md-preview .tok-operator {
-  color: #708;
+  color: var(--tok-keyword, #c678dd);
 }
 .md-preview .tok-atom,
 .md-preview .tok-bool,
 .md-preview .tok-null,
 .md-preview .tok-url,
 .md-preview .tok-labelName {
-  color: #219;
+  color: var(--tok-atom, #56b6c2);
 }
 .md-preview .tok-literal,
 .md-preview .tok-number,
 .md-preview .tok-integer,
 .md-preview .tok-float,
 .md-preview .tok-inserted {
-  color: #164;
+  color: var(--tok-number, #d19a66);
 }
 .md-preview .tok-string,
 .md-preview .tok-character,
-.md-preview .tok-attributeValue,
+.md-preview .tok-attributeValue {
+  color: var(--tok-string, #98c379);
+}
 .md-preview .tok-deleted {
-  color: #a11;
+  color: var(--tok-invalid, #e2725b);
 }
 .md-preview .tok-regexp,
 .md-preview .tok-escape {
-  color: #e40;
+  color: var(--tok-regexp, #e5c07b);
 }
 .md-preview .tok-variableName {
-  color: #00f;
+  color: var(--tok-variable, #e06c75);
 }
 .md-preview .tok-typeName,
 .md-preview .tok-namespace {
-  color: #085;
+  color: var(--tok-type, #56b6c2);
 }
 .md-preview .tok-className,
 .md-preview .tok-tagName {
-  color: #167;
+  color: var(--tok-class, #e5c07b);
 }
-.md-preview .tok-macroName {
-  color: #256;
-}
+.md-preview .tok-macroName,
 .md-preview .tok-propertyName,
 .md-preview .tok-attributeName {
-  color: #00c;
+  color: var(--tok-property, #61afef);
 }
 .md-preview .tok-comment,
 .md-preview .tok-lineComment,
 .md-preview .tok-blockComment {
-  color: #940;
+  color: var(--tok-comment, #7d97a5);
+  font-style: italic;
 }
 .md-preview .tok-meta {
-  color: #404740;
+  color: var(--tok-meta, #9aaab4);
 }
 .md-preview .tok-invalid {
-  color: #f00;
+  color: var(--tok-invalid, #e2725b);
 }
+
 .md-preview table {
   border-collapse: collapse;
 }
 .md-preview th,
 .md-preview td {
-  border: 1px solid #d0d7de;
+  border: 1px solid var(--line, #2a4452);
   padding: 6px 12px;
+}
+.md-preview th {
+  background: var(--surface, #16242f);
 }
 .md-preview img {
   max-width: 100%;
@@ -158,7 +199,7 @@ body {
   align-items: center;
   height: 1em;
   padding-top: 0.15em;
-  color: #8c8c8c;
+  color: var(--muted, #7d97a5);
   opacity: 0;
   transition: opacity 0.12s;
   text-decoration: none;
@@ -170,13 +211,13 @@ body {
   opacity: 1;
 }
 .md-anchor:hover {
-  color: #1677ff;
+  color: var(--accent, #3fb6c4);
 }
 /* 點錨點 / #slug 連結後,目標標題短暫高亮 */
 @keyframes md-heading-flash {
   0%,
   60% {
-    background: rgba(22, 119, 255, 0.14);
+    background: var(--accent-soft, rgba(63, 182, 196, 0.18));
   }
   100% {
     background: transparent;
@@ -187,7 +228,7 @@ body {
   border-radius: 4px;
 }
 
-/* VSCode 式分頁列 */
+/* ---- VSCode 式分頁列 ---- */
 .ph-tab {
   display: inline-flex;
   align-items: center;
@@ -195,21 +236,22 @@ body {
   padding: 3px 8px;
   max-width: 200px;
   font-size: 13px;
-  color: #666;
-  background: #f5f5f5;
-  border: 1px solid #eee;
+  color: var(--muted, #7d97a5);
+  background: var(--surface, #16242f);
+  border: 1px solid var(--line, #2a4452);
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
   flex: 0 0 auto;
 }
 .ph-tab:hover {
-  background: #eee;
+  background: var(--card, #1d3340);
+  color: var(--text, #d7e3ea);
 }
 .ph-tab-active {
-  color: #1677ff;
-  background: #fff;
-  border-color: #1677ff;
+  color: var(--accent, #3fb6c4);
+  background: var(--card, #1d3340);
+  border-color: var(--accent, #3fb6c4);
 }
 .ph-tab-name {
   overflow: hidden;
@@ -217,17 +259,17 @@ body {
 }
 .ph-tab-close {
   font-size: 11px;
-  color: #aaa;
+  color: var(--muted, #7d97a5);
   border-radius: 3px;
   padding: 2px;
   flex-shrink: 0;
 }
 .ph-tab-close:hover {
-  color: #333;
-  background: rgba(0, 0, 0, 0.08);
+  color: var(--text, #d7e3ea);
+  background: rgba(255, 255, 255, 0.1);
 }
 
-/* 搜尋結果命中行:行號 + 片段,hover 反白,點擊開檔跳行 */
+/* ---- 搜尋結果 ---- */
 .ph-search-hit {
   display: flex;
   align-items: baseline;
@@ -238,9 +280,8 @@ body {
   overflow: hidden;
 }
 .ph-search-hit:hover {
-  background: #f0f7ff;
+  background: var(--accent-faint, rgba(63, 182, 196, 0.08));
 }
-
 /* 搜尋結果的檔名列:可點(= 開檔並回檔案樹),故比照命中列給 hover / pointer */
 .ph-search-file {
   display: flex;
@@ -248,27 +289,28 @@ body {
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
-  color: #333;
+  color: var(--text, #d7e3ea);
   padding: 2px 4px;
   border-radius: 4px;
   cursor: pointer;
 }
 .ph-search-file:hover {
-  background: #f0f7ff;
+  background: var(--accent-faint, rgba(63, 182, 196, 0.08));
 }
 
 /* 表格 cell 失焦時「縮起的連結」:overlay 本體 pointer-events:none,唯 <a> 可 hover/點 */
 .ph-cell-link {
   pointer-events: auto;
-  color: #1677ff;
+  color: var(--accent, #3fb6c4);
   text-decoration: underline;
   cursor: pointer;
 }
 .ph-cell-link:hover {
-  color: #0958d9;
+  filter: brightness(1.25);
 }
 
-/* Explore 樹節點:讓 icon + 標題同列(標題 flex:1 自適應),避免 width:100% 溢出換行 */
+/* ---- Explore 樹 ---- */
+/* 讓 icon + 標題同列(標題 flex:1 自適應),避免 width:100% 溢出換行 */
 .ph-tree .ant-tree-node-content-wrapper {
   display: inline-flex;
   align-items: center;
@@ -305,4 +347,95 @@ body {
 .ant-tree-treenode:hover .ph-row-actions,
 .ant-tree-treenode-selected .ph-row-actions {
   display: inline-flex;
+}
+
+/* ---- Chat:留言卡形狀(形狀參考 tide/src/ui/CommentPanel.tsx) ---- */
+.ph-chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ph-turn {
+  background: var(--card, #1d3340);
+  border: 1px solid var(--line, #2a4452);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.ph-turn.target {
+  border-color: var(--accent, #3fb6c4);
+  box-shadow: 0 0 0 1px var(--accent, #3fb6c4) inset;
+}
+.ph-turn-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 11.5px;
+  margin-bottom: 6px;
+}
+.ph-turn-head .spacer {
+  flex: 1;
+}
+.ph-turn-who {
+  color: var(--accent, #3fb6c4);
+  font-weight: 600;
+}
+.ph-turn-at {
+  color: var(--muted, #7d97a5);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.ph-turn-link {
+  background: none;
+  border: none;
+  color: var(--muted, #7d97a5);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 2px;
+  opacity: 0.75;
+}
+.ph-turn-link:hover {
+  opacity: 1;
+  color: var(--accent, #3fb6c4);
+}
+/* 綁檔 chat 的 header chip */
+.ph-chat-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  font-size: 11.5px;
+  color: var(--accent, #3fb6c4);
+  background: var(--accent-faint, rgba(63, 182, 196, 0.08));
+  border: 1px solid var(--line, #2a4452);
+  border-radius: 6px;
+  padding: 1px 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ph-chat-link:hover {
+  border-color: var(--accent, #3fb6c4);
+}
+
+/* ---- 捲軸(深色底的預設捲軸太亮) ---- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line, #2a4452) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line, #2a4452);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted, #7d97a5);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
 }

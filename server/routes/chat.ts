@@ -1,29 +1,61 @@
 /**
- * chat route — Chat tab。
- * POST /api/:repo/chat                  body {thread, prompt} → SSE 串流 claude -p
- * GET  /api/:repo/chat/threads          列 <repo>/doc/chat/*.md
- * GET  /api/:repo/chat/threads/:thread  讀某 thread
+ * chat route — 對話。
+ *  POST   /api/:repo/chat                   body {thread, prompt, link?, model?, effort?} → SSE 串流 claude -p
+ *  GET    /api/:repo/chat/threads           列 <repo>/doc/chat/*.md(含 title / link)
+ *  GET    /api/:repo/chat/threads/:thread   讀某 thread
+ *  POST   /api/:repo/chat/threads/:t/rename body {to?} → 手動改名 / 自動命名
+ *  GET    /api/:repo/chat/for-file?path=    某個檔的「預設對話」是哪一條(SPEC §4.2.1)
+ *  GET    /api/:repo/chat/jobs/:thread      那輪還在跑嗎
+ *  DELETE /api/:repo/chat/jobs/:thread      中斷那輪
+ *  GET    /api/chat/engine                  可選的 model / effort(前端 ⚙ 用)
  *
  * 寫入面收斂(SPEC §2):Chat 只寫 <repo>/doc/chat/,經 path-guard。
- * 紀錄格式:檔首一行 H1 = **顯示標題**(可中文),之後 human / assistant 輪流 append markdown。
+ * 紀錄格式:檔首一行 H1 = **顯示標題**(可中文),綁檔的再加一行 link 註記,
+ * 之後 human / assistant 輪流 append markdown。見 SPEC §9.3。
  *
  * 檔名 vs 標題:**檔名一律英文 kebab-case slug**(跨工具 / git / URL 都安全),
  * 想看的中文放在檔案第一行 `# 標題` —— 顯示名跟著檔案走(搬移 / clone / 在 Explore
- * 看都還在),不必另存一份 index 去 drift。列表回傳的 title 即此 H1;舊檔沒有 H1
- * (porthole 早期只 append turn)→ title 為 null,前端退回顯示檔名。
+ * 看都還在),不必另存一份 index 去 drift。
  */
 import type { FastifyInstance } from 'fastify';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { guard } from '../lib/path-guard.ts';
-import { runClaude } from '../lib/claude-p.ts';
+import { runClaude, MODELS, EFFORTS, type ClaudeRun } from '../lib/claude-p.ts';
 import { safeThread, slugify, readH1, setH1, parseGenTitle } from '../lib/chat-title.ts';
+import { readLink, setLink, linkSuffix, linkedThreadName, reslug, linkContext } from '../lib/chat-link.ts';
 
 const CHAT_DIR = 'doc/chat';
+/** 檔頭讀多少就夠拿到 title + link(列表可能幾十個檔,不為兩行把整檔讀進來)。 */
+const HEAD_BYTES = 4096;
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+/* ------------------------------------------------------------------ *
+ * job registry —— 「那輪還在跑嗎 / 停得掉嗎」
+ *
+ * SSE 連線隨 reload 斷掉,但後端那趟 claude -p 還在跑。只靠「檔尾是 Human turn」
+ * 去猜(前端的 fallback)看不出是真的在跑還是當掉了,也沒辦法中斷。所以在記憶體
+ * 記一份 in-flight 表:開 thread / 重整 / 另一台瀏覽器進來都問得到,也殺得掉。
+ * 後端重啟 → 表隨記憶體消失(那支子程序也跟著死),前端退回檔案輪詢。
+ * ------------------------------------------------------------------ */
+interface Job {
+  state: 'running';
+  startedAt: number;
+  model?: string;
+  effort?: string;
+  run: ClaudeRun;
+}
+const jobs = new Map<string, Job>();
+const jobKey = (repo: string, thread: string) => `${repo}\u0000${thread}`;
+
+/** 對外形狀(不把 run 這個 handle 洩出去)。 */
+function jobView(j: Job | undefined) {
+  if (!j) return null;
+  return { state: j.state, startedAt: j.startedAt, model: j.model ?? null, effort: j.effort ?? null };
 }
 
 /**
@@ -72,40 +104,94 @@ function buildContextPrompt(priorRaw: string, latest: string): string {
   );
 }
 
-export default async function chatRoutes(app: FastifyInstance) {
-  app.get<{ Params: { repo: string } }>('/api/:repo/chat/threads', async (req) => {
-    const repoRoot = guard.repoRoot(req.params.repo);
-    const dir = path.join(repoRoot, CHAT_DIR);
-    let names: string[] = [];
+interface ThreadRow {
+  name: string;
+  mtime: number;
+  title: string | null;
+  link: string | null;
+}
+
+/** 讀每個 thread 的檔頭,取 title(H1)與 link 註記。讀不到 → 兩者皆 null。 */
+async function listThreads(repoRoot: string): Promise<ThreadRow[]> {
+  const dir = path.join(repoRoot, CHAT_DIR);
+  let names: string[];
+  try {
+    names = await fs.readdir(dir);
+  } catch {
+    return [];
+  }
+  const rows: ThreadRow[] = [];
+  for (const n of names) {
+    if (!n.endsWith('.md')) continue;
+    const file = path.join(dir, n);
+    let st;
     try {
-      names = await fs.readdir(dir);
+      st = await fs.stat(file);
     } catch {
-      return { threads: [] };
+      continue; // 列完之後被刪掉
     }
-    const threads = [];
-    for (const n of names) {
-      if (!n.endsWith('.md')) continue;
-      const file = path.join(dir, n);
-      const st = await fs.stat(file);
-      // 顯示標題 = 檔首 H1。只讀前 4KB(列表可能幾十個檔,不為一行標題整檔讀進來)。
-      let title: string | null = null;
+    let title: string | null = null;
+    let link: string | null = null;
+    try {
+      const fh = await fs.open(file, 'r');
       try {
-        const fh = await fs.open(file, 'r');
-        try {
-          const buf = Buffer.alloc(4096);
-          const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
-          title = readH1(buf.subarray(0, bytesRead).toString('utf8'));
-        } finally {
-          await fh.close();
-        }
-      } catch {
-        /* 讀不到標題 → null,前端退回顯示檔名 */
+        const buf = Buffer.alloc(HEAD_BYTES);
+        const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+        const head = buf.subarray(0, bytesRead).toString('utf8');
+        title = readH1(head);
+        link = readLink(head);
+      } finally {
+        await fh.close();
       }
-      threads.push({ name: n.slice(0, -3), mtime: st.mtimeMs, title });
+    } catch {
+      /* 讀不到檔頭 → 前端退回顯示檔名 */
     }
-    threads.sort((a, b) => b.mtime - a.mtime);
-    return { threads };
-  });
+    rows.push({ name: n.slice(0, -3), mtime: st.mtimeMs, title, link });
+  }
+  rows.sort((a, b) => b.mtime - a.mtime);
+  return rows;
+}
+
+/** repo 相對路徑正規化(擋 `..`;真正的邊界仍由 path-guard 把關)。 */
+function relPath(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const rel = raw.replace(/\\/g, '/').replace(/^\.?\/+/, '').trim();
+  if (!rel || rel.split('/').some((seg) => seg === '..')) return null;
+  return rel;
+}
+
+export default async function chatRoutes(app: FastifyInstance) {
+  // ⚙ 可選的 model / effort(白名單;前端只畫下拉,不自己編清單)。
+  app.get('/api/chat/engine', async () => ({ engine: 'claude', models: MODELS, efforts: EFFORTS }));
+
+  app.get<{ Params: { repo: string } }>('/api/:repo/chat/threads', async (req) => ({
+    threads: await listThreads(guard.repoRoot(req.params.repo)),
+  }));
+
+  /**
+   * 某個檔的「預設對話」是哪一條(SPEC §4.2.1)。
+   * 以 link 註記為準(權威),註記缺了才退回檔名後綴;都沒有 → 回一個**還不存在**的建議名字
+   * (前端照它開新對話,第一次送出才落檔)。
+   */
+  app.get<{ Params: { repo: string }; Querystring: { path?: string } }>(
+    '/api/:repo/chat/for-file',
+    async (req, reply) => {
+      const rel = relPath(req.query.path);
+      if (!rel) return reply.code(400).send({ error: 'bad path' });
+      const rows = await listThreads(guard.repoRoot(req.params.repo));
+      const byLink = rows.find((r) => r.link === rel);
+      if (byLink) return { name: byLink.name, title: byLink.title, exists: true };
+      const suf = linkSuffix(rel);
+      // 後綴對得上、且沒被別的檔占用(link 註記指到別處)才算是這個檔的
+      const bySuffix = rows.find((r) => r.name.endsWith(suf) && (r.link === null || r.link === rel));
+      if (bySuffix) return { name: bySuffix.name, title: bySuffix.title, exists: true };
+      // 都沒有 → 給一個沒被占用的新名字(中文檔名收斂後可能撞,見 chat-link.fileSlug)
+      const taken = new Set(rows.map((r) => r.name));
+      let name = linkedThreadName(rel);
+      for (let i = 2; taken.has(name); i++) name = `${linkedThreadName(rel)}-${i}`;
+      return { name, title: null, exists: false };
+    },
+  );
 
   app.get<{ Params: { repo: string; thread: string } }>(
     '/api/:repo/chat/threads/:thread',
@@ -121,8 +207,23 @@ export default async function chatRoutes(app: FastifyInstance) {
     },
   );
 
-  // thread 改名:body 給 {to} → 手動改名(safeThread 收斂);否則用 claude 分析主題自動命名。
-  // 寫入面仍鎖 doc/chat/。
+  app.get<{ Params: { repo: string; thread: string } }>(
+    '/api/:repo/chat/jobs/:thread',
+    async (req) => ({ job: jobView(jobs.get(jobKey(req.params.repo, safeThread(req.params.thread)))) }),
+  );
+
+  // 中斷:SIGTERM 那支 claude -p。已 append 的 turn 不回捲(SPEC §4.2)。
+  app.delete<{ Params: { repo: string; thread: string } }>(
+    '/api/:repo/chat/jobs/:thread',
+    async (req, reply) => {
+      const j = jobs.get(jobKey(req.params.repo, safeThread(req.params.thread)));
+      if (!j) return reply.code(404).send({ error: 'no running job' });
+      j.run.abort();
+      return { ok: true };
+    },
+  );
+
+  // thread 改名:body 給 {to} → 手動改名;否則用 claude 分析主題自動命名。寫入面仍鎖 doc/chat/。
   app.post<{ Params: { repo: string; thread: string }; Body: { to?: string } }>(
     '/api/:repo/chat/threads/:thread/rename',
     async (req, reply) => {
@@ -143,7 +244,7 @@ export default async function chatRoutes(app: FastifyInstance) {
       // 換成底線的 `3090_24G_____`。slug 為空(純中文)→ 檔名維持原樣,只改標題。
       const auto = manual ? null : await genTitle(content, guard.repoRoot(repo));
       const title = manual || auto?.title || '';
-      const base = manual ? slugify(manual) : (auto?.slug ?? '');
+      const slug = manual ? slugify(manual) : (auto?.slug ?? '');
 
       // 標題寫進檔首 H1(先寫,檔名改不改都要有標題)。
       if (title) {
@@ -153,85 +254,118 @@ export default async function chatRoutes(app: FastifyInstance) {
           content = next;
         }
       }
-      if (!base) return { name: oldName, title: title || readH1(content) }; // 只改標題,檔名不動
+      const done = () => ({ name: oldName, title: title || readH1(content), link: readLink(content) });
+      if (!slug) return done(); // 只改標題,檔名不動
+
+      // 綁檔的 thread:只換 `<slug>` 段,`-<file>-<hex12>` 後綴保持不動(SPEC §4.2.1)。
+      const link = readLink(content);
+      const base = (link && reslug(oldName, link, slug)) || slug;
 
       // 命名衝突 → 加 -2/-3…;與原名相同則免改。
       let name = base;
       for (let i = 2; ; i++) {
         const candidate = safeThread(name);
-        if (candidate === oldName) return { name: oldName, title: title || readH1(content) };
+        if (candidate === oldName) return done();
         const target = guard.resolveInRepo(repo, `${CHAT_DIR}/${candidate}.md`);
         if (!existsSync(target)) {
           await fs.rename(oldFile, target);
-          return { name: candidate, title: title || readH1(content) };
+          return { name: candidate, title: title || readH1(content), link };
         }
         name = `${base}-${i}`;
       }
     },
   );
 
-  app.post<{ Params: { repo: string }; Body: { thread?: string; prompt?: string } }>(
-    '/api/:repo/chat',
-    async (req, reply) => {
-      const repo = req.params.repo;
-      const prompt = (req.body?.prompt ?? '').trim();
-      const thread = safeThread(req.body?.thread ?? 'default');
-      if (!prompt) return reply.code(400).send({ error: 'empty prompt' });
+  app.post<{
+    Params: { repo: string };
+    Body: { thread?: string; prompt?: string; link?: string; model?: string; effort?: string };
+  }>('/api/:repo/chat', async (req, reply) => {
+    const repo = req.params.repo;
+    const prompt = (req.body?.prompt ?? '').trim();
+    const thread = safeThread(req.body?.thread ?? 'default');
+    if (!prompt) return reply.code(400).send({ error: 'empty prompt' });
 
-      const cwd = guard.repoRoot(repo); // CWD = repo root
-      const rel = `${CHAT_DIR}/${thread}.md`;
-      const file = guard.resolveInRepo(repo, rel); // 寫入面:只允許 doc/chat/
-      await fs.mkdir(path.dirname(file), { recursive: true });
+    const key = jobKey(repo, thread);
+    if (jobs.has(key)) return reply.code(409).send({ error: 'this thread already has a running job' });
 
-      // 取先前對話當 context(在寫入本輪 human turn「之前」讀,故是純粹的上文)。
-      let priorRaw = '';
+    // model / effort 走白名單:argv 不經 shell 已擋掉注入,但也不該把任意字串當 flag 丟給 CLI。
+    const model = MODELS.includes(req.body?.model as never) ? req.body?.model : undefined;
+    const effort = EFFORTS.includes(req.body?.effort as never) ? req.body?.effort : undefined;
+    // 綁檔對話:link = 那個檔的 repo 相對路徑(SPEC §4.2.1)。
+    const link = relPath(req.body?.link);
+
+    const cwd = guard.repoRoot(repo); // CWD = repo root
+    const file = guard.resolveInRepo(repo, `${CHAT_DIR}/${thread}.md`); // 寫入面:只允許 doc/chat/
+    await fs.mkdir(path.dirname(file), { recursive: true });
+
+    // 取先前對話當 context(在寫入本輪 human turn「之前」讀,故是純粹的上文)。
+    let priorRaw = '';
+    try {
+      priorRaw = await fs.readFile(file, 'utf8');
+    } catch {
+      /* 新 thread,無上文 */
+    }
+
+    // 綁檔的 thread:確保 link 註記在檔裡(第一次送出時寫進去;檔名只是給人看的)。
+    if (link && readLink(priorRaw) !== link) {
+      priorRaw = setLink(priorRaw, link);
+      await fs.writeFile(file, priorRaw, 'utf8');
+    }
+
+    // 先寫 human turn
+    await fs.appendFile(file, `\n## 🧑 Human · ${nowIso()}\n\n${prompt}\n`);
+
+    // SSE headers
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    const send = (event: string, data: unknown) => {
       try {
-        priorRaw = await fs.readFile(file, 'utf8');
-      } catch {
-        /* 新 thread,無上文 */
-      }
-
-      // 先寫 human turn
-      await fs.appendFile(file, `\n## 🧑 Human · ${nowIso()}\n\n${prompt}\n`);
-
-      // SSE headers
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no',
-      });
-      const send = (event: string, data: unknown) => {
         reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-      };
+      } catch {
+        /* client 已斷線 → 這輪照跑,回覆由下面的 appendFile 落檔 */
+      }
+    };
 
-      let assistant = '';
-      // 帶上文:把先前對話 + 最新訊息一起給 claude -p(否則 stateless 沒記憶)。
-      // yolo:讓 chat agent 能實際用工具(否則多數功能被權限提示卡住);CWD 受 path-guard。
-      const run = runClaude(buildContextPrompt(priorRaw, prompt), cwd, { yolo: true });
+    let assistant = '';
+    // 帶上文:把先前對話 + 最新訊息一起給 claude -p(否則 stateless 沒記憶)。
+    // 綁檔的再前綴一段脈絡區塊(開著哪個檔 / 可以改它 / 要回報)。
+    // yolo:讓 chat agent 能實際用工具(否則多數功能被權限提示卡住);CWD 受 path-guard。
+    const body = buildContextPrompt(priorRaw, prompt);
+    const full = link ? linkContext(repo, link) + body : body;
+    const run = runClaude(full, cwd, { yolo: true, model, effort });
+    jobs.set(key, { state: 'running', startedAt: Date.now(), model, effort, run });
 
-      // client 中斷 → kill 子程序
-      req.raw.on('close', () => run.abort());
+    // **client 斷線不 kill 子程序**:關分頁 / 重整 / 切去別的 thread 都要讓這輪跑完並 append
+    // 到檔案(SPEC §4.2「切走那輪不中斷」)。要停就明確打 DELETE /chat/jobs/:thread。
+    // 斷線後 reply.raw.write 會失敗 → 吞掉,別讓它炸掉整個 handler(回覆仍會寫進檔案)。
 
-      run.onChunk((text) => {
-        assistant += text;
-        send('delta', { text });
-      });
-      run.onError((text) => send('stderr', { text }));
+    run.onChunk((text) => {
+      assistant += text;
+      send('delta', { text });
+    });
+    run.onError((text) => send('stderr', { text }));
 
-      await new Promise<void>((resolve) => {
-        run.onEnd(async (code) => {
-          try {
-            await fs.appendFile(file, `\n## 🤖 Assistant · ${nowIso()}\n\n${assistant}\n`);
-          } catch {
-            /* 寫檔失敗不阻斷回應 */
-          }
-          send('done', { code });
+    await new Promise<void>((resolve) => {
+      run.onEnd(async (code) => {
+        jobs.delete(key);
+        try {
+          await fs.appendFile(file, `\n## 🤖 Assistant · ${nowIso()}\n\n${assistant}\n`);
+        } catch {
+          /* 寫檔失敗不阻斷回應 */
+        }
+        send('done', { code });
+        try {
           reply.raw.end();
-          resolve();
-        });
+        } catch {
+          /* 已斷線 */
+        }
+        resolve();
       });
-      return reply;
-    },
-  );
+    });
+    return reply;
+  });
 }
