@@ -147,10 +147,13 @@ export const api = {
     return (await r.json()) as { name: string; title?: string | null; link?: string | null };
   },
 
-  /** 某個檔的預設對話是哪一條(SPEC §4.2.1)。exists=false → 名字是建議值,還沒落檔。 */
-  threadForFile: (repo: string, path: string) =>
+  /** 某個檔的預設對話是哪一條(SPEC §4.2.1)。exists=false → 名字是建議值,還沒落檔。
+   *  fresh=true:不要找既有的,給一個沒被占用的新名字(同一個檔要再開一條)。 */
+  threadForFile: (repo: string, path: string, fresh = false) =>
     jget<{ name: string; title: string | null; exists: boolean }>(
-      `/api/${encodeURIComponent(repo)}/chat/for-file?path=${encodeURIComponent(path)}`,
+      `/api/${encodeURIComponent(repo)}/chat/for-file?path=${encodeURIComponent(path)}${
+        fresh ? '&new=1' : ''
+      }`,
     ),
 
   /** 那輪還在跑嗎。 */

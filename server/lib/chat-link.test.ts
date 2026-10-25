@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   fileSlug,
-  folderHex,
+  pathHex,
   splitRel,
   linkSuffix,
   linkedThreadName,
@@ -32,17 +32,23 @@ test('splitRel:拆資料夾與檔名', () => {
   assert.deepEqual(splitRel('./a.md'), { dir: '', base: 'a.md' });
 });
 
-test('folderHex:12 碼 hex、同夾穩定、異夾不同', () => {
-  const h = folderHex('doc/note');
+test('pathHex:12 碼 hex,同一個檔的各種寫法同碼、不同檔不同碼', () => {
+  const h = pathHex('doc/note/a.md');
   assert.match(h, /^[0-9a-f]{12}$/);
-  assert.equal(h, folderHex('doc/note/'));
-  assert.equal(h, folderHex('./doc/note'));
-  assert.notEqual(h, folderHex('doc/chat'));
-  assert.match(folderHex(''), /^[0-9a-f]{12}$/); // repo 根
+  assert.equal(h, pathHex('./doc/note/a.md'));
+  assert.equal(h, pathHex('doc/note/a.md/'));
+  assert.notEqual(h, pathHex('doc/note/b.md'));
+  assert.notEqual(h, pathHex('doc/chat/a.md'));
+  assert.match(pathHex('a.md'), /^[0-9a-f]{12}$/); // repo 根下的檔
 });
 
 test('同名檔在不同資料夾 → 後綴不同(這就是 hex 存在的理由)', () => {
   assert.notEqual(linkSuffix('doc/a/README.md'), linkSuffix('doc/b/README.md'));
+});
+
+test('同夾、收斂後長得一樣的中文檔名 → 後綴仍不同(hex 算完整路徑才做得到)', () => {
+  assert.equal(fileSlug('我的筆記.md'), fileSlug('你的筆記.md')); // 片段一樣
+  assert.notEqual(linkSuffix('doc/我的筆記.md'), linkSuffix('doc/你的筆記.md')); // 後綴不一樣
 });
 
 test('linkedThreadName:沒 slug 用 chat', () => {

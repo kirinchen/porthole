@@ -480,17 +480,32 @@ export default function Chat({ repo, isActive, layout = 'panel', linkPath }: Pro
     }
   };
 
-  const newThread = () => {
-    const name = `thread-${Date.now()}`;
+  /**
+   * 開新對話。
+   *  - 檔案模式(panel + 開著某個檔)→ 再開**一條綁同一個檔的**(列表只列這個檔的,
+   *    開一條不綁檔的會當場從列表消失)。名字跟後端要,避免撞到既有的。
+   *  - 對話模式 → `thread-<ts>`,不綁檔(行為同舊版)。
+   */
+  const newThread = async () => {
+    setListOpen(false);
+    const linked = layout === 'panel' && linkPath ? linkPath : null;
+    let name = `thread-${Date.now()}`;
+    if (linked) {
+      try {
+        name = (await api.threadForFile(repo, linked, true)).name;
+      } catch {
+        /* 問不到就退回不綁檔的預設名 */
+      }
+    }
     writeThreadUrl(name, true); // 開新對話也留一筆歷史
     setActive(name);
     setActiveTitle(null);
-    setActiveLink(null); // 「新對話」= 不綁檔(行為同舊版)
+    setActiveLink(linked);
     setTurns([]);
     setPendingReply(false);
     setJob(null);
+    setHighlight(null);
     setInput('');
-    setListOpen(false);
   };
 
   /** 複製某一則的 deep-link(`?thread=…&turn=N`,保留模式 hash)。 */
@@ -508,15 +523,37 @@ export default function Chat({ repo, isActive, layout = 'panel', linkPath }: Pro
     );
   };
 
+  /**
+   * 檔案模式只列**這個檔的**對話(SPEC §4.2.1)—— 右欄的身分就是「這個檔的對話」,
+   * 把整個 repo 的對話都倒出來反而找不到東西。正在看的那條一定留著(可能還沒落檔,
+   * 所以不在 threads 裡)。對話模式(`full`)則列全部。
+   */
+  const fileScoped = layout === 'panel' && !!linkPath;
+  const shownThreads = fileScoped
+    ? threads.filter((t) => t.link === linkPath || t.name === active)
+    : threads;
+
   const threadRows = (
     <>
-      <Button block icon={<PlusOutlined />} onClick={newThread} style={{ marginBottom: 8 }} data-loc="chat:thread:new">
+      <Button
+        block
+        icon={<PlusOutlined />}
+        onClick={() => void newThread()}
+        style={{ marginBottom: 8 }}
+        title={fileScoped ? `再開一條綁著 ${linkPath} 的對話` : '開一條不綁檔的新對話'}
+        data-loc="chat:thread:new"
+      >
         新對話
       </Button>
+      {fileScoped && (
+        <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>
+          只列綁著 {linkPath} 的對話
+        </Typography.Text>
+      )}
       <List
         size="small"
-        dataSource={threads}
-        locale={{ emptyText: '尚無對話' }}
+        dataSource={shownThreads}
+        locale={{ emptyText: fileScoped ? '這個檔還沒有對話' : '尚無對話' }}
         renderItem={(t) => (
           <List.Item
             onClick={() => {
@@ -609,7 +646,11 @@ export default function Chat({ repo, isActive, layout = 'panel', linkPath }: Pro
             content={<div style={{ width: 260, maxHeight: 380, overflow: 'auto' }} data-loc="chat:list">{threadRows}</div>}
             placement="bottomLeft"
           >
-            <Button icon={<UnorderedListOutlined />} data-loc="chat:list:toggle" />
+            <Button
+              icon={<UnorderedListOutlined />}
+              title={fileScoped ? `${linkPath} 的對話` : '對話列表'}
+              data-loc="chat:list:toggle"
+            />
           </Popover>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>

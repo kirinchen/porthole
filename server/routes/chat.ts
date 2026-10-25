@@ -172,23 +172,28 @@ export default async function chatRoutes(app: FastifyInstance) {
    * 某個檔的「預設對話」是哪一條(SPEC §4.2.1)。
    * 以 link 註記為準(權威),註記缺了才退回檔名後綴;都沒有 → 回一個**還不存在**的建議名字
    * (前端照它開新對話,第一次送出才落檔)。
+   * `?new=1`:不要找既有的,直接給一個沒被占用的新名字 —— 同一個檔要再開一條時用。
    */
-  app.get<{ Params: { repo: string }; Querystring: { path?: string } }>(
+  app.get<{ Params: { repo: string }; Querystring: { path?: string; new?: string } }>(
     '/api/:repo/chat/for-file',
     async (req, reply) => {
       const rel = relPath(req.query.path);
       if (!rel) return reply.code(400).send({ error: 'bad path' });
       const rows = await listThreads(guard.repoRoot(req.params.repo));
-      const byLink = rows.find((r) => r.link === rel);
-      if (byLink) return { name: byLink.name, title: byLink.title, exists: true };
-      const suf = linkSuffix(rel);
-      // 後綴對得上、且沒被別的檔占用(link 註記指到別處)才算是這個檔的
-      const bySuffix = rows.find((r) => r.name.endsWith(suf) && (r.link === null || r.link === rel));
-      if (bySuffix) return { name: bySuffix.name, title: bySuffix.title, exists: true };
-      // 都沒有 → 給一個沒被占用的新名字(中文檔名收斂後可能撞,見 chat-link.fileSlug)
+      const wantNew = req.query.new === '1';
+      if (!wantNew) {
+        const byLink = rows.find((r) => r.link === rel);
+        if (byLink) return { name: byLink.name, title: byLink.title, exists: true };
+        const suf = linkSuffix(rel);
+        // 後綴對得上、且沒被別的檔占用(link 註記指到別處)才算是這個檔的
+        const bySuffix = rows.find((r) => r.name.endsWith(suf) && (r.link === null || r.link === rel));
+        if (bySuffix) return { name: bySuffix.name, title: bySuffix.title, exists: true };
+      }
+      // 給一個沒被占用的新名字(第一次送出才真的落檔)
       const taken = new Set(rows.map((r) => r.name));
-      let name = linkedThreadName(rel);
-      for (let i = 2; taken.has(name); i++) name = `${linkedThreadName(rel)}-${i}`;
+      const base = linkedThreadName(rel);
+      let name = base;
+      for (let i = 2; taken.has(name); i++) name = `${base}-${i}`;
       return { name, title: null, exists: false };
     },
   );

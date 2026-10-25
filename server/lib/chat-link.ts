@@ -4,8 +4,9 @@
  * 規則(SPEC §4.2.1):`doc/chat/<slug>-<file>-<hex12>.md`
  *   - `<slug>`  主題 slug(首輪自動命名產生;還沒命名時 `chat`)
  *   - `<file>`  綁的檔名含副檔名,`.` → `-`、其餘非 [A-Za-z0-9_-] → `_`、截 48
- *   - `<hex12>` sha256(repo 相對**資料夾**路徑) 前 12 碼;同名檔在不同夾不會撞,
- *               而且資料夾多深,檔名都只多 12 個字(直接把路徑塞進檔名會長到難看)
+ *   - `<hex12>` sha256(repo 相對**完整路徑**)前 12 碼;路徑多深、檔名是不是中文,
+ *               檔名都只多 12 個字(直接把路徑塞進檔名會長到難看),而且**一檔一碼**
+ *               —— 這是檔名真正的識別碼,`<file>` 段只是給人看的
  *
  * **權威來源是檔案裡的 link 註記,不是檔名**:檔名會被改名 / 搬動,註記不會。
  *   `<!-- porthole:link doc/note/foo.md -->`
@@ -15,10 +16,9 @@ import { createHash } from 'node:crypto';
 /**
  * 檔名(含副檔名)→ 檔名片段。`.` 換 `-` 是為了讓 `.md` 這類副檔名還看得出來。
  *
- * 非 ASCII 一律換成 `_`(檔名不收中文,SPEC §9.3),所以**兩個不同的中文檔名可能得到同一個片段**
- * (`我的筆記.md` 與 `你的筆記.md` 都是 `___-md`)。這不會讓兩條對話混在一起 ——
- * 建立時會比對既有檔的 link 註記,撞到別的檔就加 `-2`(同 rename 的衝突策略),
- * 而反查以 link 註記為準(檔名只是給人看的)。
+ * 非 ASCII 一律換成 `_`(檔名不收中文,SPEC §9.3),所以兩個不同的中文檔名可能得到同一個片段
+ * (`我的筆記.md` 與 `你的筆記.md` 都是 `____-md`)。不影響正確性 —— 識別碼是後面那 12 碼 hex
+ * (算**完整路徑**),這一段純粹是給人在 `doc/chat/` 裡一眼看出在聊哪個檔。
  */
 export function fileSlug(basename: string): string {
   return (
@@ -31,9 +31,13 @@ export function fileSlug(basename: string): string {
   );
 }
 
-/** repo 相對資料夾路徑 → 12 碼 hex(repo 根目錄用空字串算)。 */
-export function folderHex(dir: string): string {
-  const norm = dir.replace(/\\/g, '/').replace(/^\.?\/+|\/+$/g, '');
+/**
+ * repo 相對**完整路徑** → 12 碼 hex。一檔一碼:不同資料夾的同名檔、以及收斂後長得一樣的
+ * 中文檔名,都靠這 12 碼分開。正規化(去 `./`、反斜線、尾斜線)後才雜湊,同一個檔
+ * 不管用哪種寫法進來都得到同一碼。
+ */
+export function pathHex(rel: string): string {
+  const norm = rel.replace(/\\/g, '/').replace(/^\.?\/+|\/+$/g, '');
   return createHash('sha256').update(norm, 'utf8').digest('hex').slice(0, 12);
 }
 
@@ -44,10 +48,9 @@ export function splitRel(rel: string): { dir: string; base: string } {
   return i === -1 ? { dir: '', base: norm } : { dir: norm.slice(0, i), base: norm.slice(i + 1) };
 }
 
-/** 綁檔對話的檔名後綴 `-<file>-<hex12>`(反查用:檔名比不到就靠這個 suffix)。 */
+/** 綁檔對話的檔名後綴 `-<file>-<hex12>`(反查用:link 註記缺了就靠這個 suffix)。 */
 export function linkSuffix(rel: string): string {
-  const { dir, base } = splitRel(rel);
-  return `-${fileSlug(base)}-${folderHex(dir)}`;
+  return `-${fileSlug(splitRel(rel).base)}-${pathHex(rel)}`;
 }
 
 /** 組綁檔對話的 thread 名。slug 省略 / 空 → `chat`。 */
