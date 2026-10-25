@@ -39,11 +39,15 @@ import {
   clearDraft,
   draftKey,
   getEffort,
+  getListWidth,
   getModel,
+  LIST_W_DEFAULT,
+  LIST_W_MIN,
   loadDraft,
   pruneDrafts,
   saveDraft,
   setEffort as writeEffort,
+  setListWidth,
   setModel as writeModel,
 } from '../lib/chatPrefs';
 
@@ -104,6 +108,17 @@ function writeThreadUrl(name: string, push = false): void {
   else history.replaceState(null, '', url);
 }
 
+/**
+ * 太長的路徑把**前面**收掉,保證看得到檔名(`doc/a/b/very-long-name.md` → `…/very-long-name.md`)。
+ * 用 JS 算而不是 CSS 的 `direction: rtl` 省略 —— 那招會把路徑裡的 `/` 當中性字元重排,
+ * 顯示出來的順序不一定是原本的。完整路徑放 `title`。
+ */
+function shortPath(p: string, max = 30): string {
+  if (p.length <= max) return p;
+  const base = p.slice(p.lastIndexOf('/') + 1);
+  return base.length + 1 >= max ? `…${base.slice(-(max - 1))}` : `…/${base}`;
+}
+
 const fmtAt = (iso: string) => {
   if (!iso) return '';
   const d = new Date(iso);
@@ -137,6 +152,9 @@ export default function Chat({ repo, isActive, layout = 'panel', linkPath }: Pro
   // deep-link `?turn=` 指到的那一則(高亮)。
   const [highlight, setHighlight] = useState<number | null>(() => turnFromUrl());
   const bottomRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // 對話模式:左欄寬度可拖(做法同 tide 的留言面板 `.cp-grip`),拖完記進 localStorage。
+  const [listW, setListW] = useState(getListWidth);
   const activeRef = useRef(true);
   useEffect(() => {
     activeRef.current = isActive !== false;
@@ -516,8 +534,39 @@ export default function Chat({ repo, isActive, layout = 'panel', linkPath }: Pro
     copyText(`${location.origin}${location.pathname}?${params.toString()}${location.hash}`);
   };
 
-  /** 點綁的檔 → 切到檔案模式並開那個檔(交給 App / Explore 接手)。 */
-  const openLinked = (rel: string) => {
+  /** 拖左欄與對話之間的桿子改寬度;放開才寫 localStorage(拖的過程不要狂寫)。 */
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const left = rootRef.current?.getBoundingClientRect().left ?? 0;
+    const move = (ev: MouseEvent) => {
+      const w = Math.max(LIST_W_MIN, Math.min(ev.clientX - left, window.innerWidth - 360));
+      setListW(w);
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      document.body.style.userSelect = '';
+      setListW((w) => {
+        setListWidth(w);
+        return w;
+      });
+    };
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+
+  /**
+   * 點綁的檔 → 檔案模式開那個檔。
+   *  - 對話模式(`full`):**另開分頁** —— 這裡整頁都是對話,就地切模式會把你正在讀的對話收掉。
+   *  - 檔案模式(`panel`):就地導航(那個檔本來就在中央,交給 App / Explore 接手)。
+   */
+  const openLinked = (rel: string, newTab = layout === 'full') => {
+    const url = `/${encodeURIComponent(repo)}/${rel.split('/').map(encodeURIComponent).join('/')}#file`;
+    if (newTab) {
+      window.open(url, '_blank', 'noopener');
+      return;
+    }
     window.dispatchEvent(
       new CustomEvent('porthole:navigate', { detail: { repo, path: rel, tab: 'file' } }),
     );
@@ -577,14 +626,17 @@ export default function Chat({ repo, isActive, layout = 'panel', linkPath }: Pro
               {streamingThreads.has(t.name) && <Spin size="small" data-loc="chat:thread:running" />}
             </div>
             {t.link && (
-              <Typography.Text
-                type="secondary"
-                ellipsis
-                style={{ fontSize: 11 }}
-                title={`綁著 ${t.link}`}
+              <span
+                className="ph-chat-linkrow"
+                title={`${t.link} —— 點一下另開分頁,在檔案模式打開它`}
+                onClick={(e) => {
+                  e.stopPropagation(); // 不要順便切到這條對話
+                  openLinked(t.link as string, true);
+                }}
+                data-loc="chat:thread:item:link"
               >
-                <FileTextOutlined /> {t.link}
-              </Typography.Text>
+                <FileTextOutlined /> {shortPath(t.link)}
+              </span>
             )}
           </List.Item>
         )}
@@ -660,11 +712,13 @@ export default function Chat({ repo, isActive, layout = 'panel', linkPath }: Pro
           {activeLink && (
             <span
               className="ph-chat-link"
-              title={`這條對話綁著 ${activeLink}(點開那個檔)`}
+              title={`這條對話綁著 ${activeLink}(點一下${
+                layout === 'full' ? '另開分頁' : ''
+              }打開那個檔)`}
               onClick={() => openLinked(activeLink)}
               data-loc="chat:link"
             >
-              <FileTextOutlined /> {activeLink}
+              <FileTextOutlined /> {shortPath(activeLink, 48)}
             </span>
           )}
         </div>
@@ -788,21 +842,32 @@ export default function Chat({ repo, isActive, layout = 'panel', linkPath }: Pro
   );
 
   return (
-    <div style={{ display: 'flex', height: '100%', minHeight: 0 }} data-loc="chat:root">
+    <div ref={rootRef} style={{ display: 'flex', height: '100%', minHeight: 0 }} data-loc="chat:root">
       {layout === 'full' && (
-        <div
-          style={{
-            width: 280,
-            flexShrink: 0,
-            borderRight: '1px solid var(--line)',
-            background: 'var(--surface)',
-            overflow: 'auto',
-            padding: 8,
-          }}
-          data-loc="chat:list"
-        >
-          {threadRows}
-        </div>
+        <>
+          <div
+            style={{
+              width: listW,
+              flexShrink: 0,
+              background: 'var(--surface)',
+              overflow: 'auto',
+              padding: 8,
+            }}
+            data-loc="chat:list"
+          >
+            {threadRows}
+          </div>
+          <div
+            className="ph-chat-grip"
+            onMouseDown={startResize}
+            onDoubleClick={() => {
+              setListW(LIST_W_DEFAULT);
+              setListWidth(LIST_W_DEFAULT);
+            }}
+            title="拖曳改寬度(雙擊回預設)"
+            data-loc="chat:list:grip"
+          />
+        </>
       )}
       {conversation}
 

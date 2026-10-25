@@ -35,6 +35,17 @@ export const setModel = (v: string) => write(MODEL_KEY, v);
 export const getEffort = () => read(EFFORT_KEY);
 export const setEffort = (v: string) => write(EFFORT_KEY, v);
 
+/** 對話模式左欄(對話列表)的寬度。同 tide 的 `tide.cpanelW`:拖完存著,下次進來一樣寬。 */
+const LIST_W_KEY = 'porthole.chat.listW';
+export const LIST_W_MIN = 200;
+export const LIST_W_DEFAULT = 280;
+
+export function getListWidth(): number {
+  const n = Number(read(LIST_W_KEY));
+  return Number.isFinite(n) && n >= LIST_W_MIN ? n : LIST_W_DEFAULT;
+}
+export const setListWidth = (w: number) => write(LIST_W_KEY, String(Math.round(w)));
+
 export const draftKey = (repo: string, thread: string) => `${DRAFT_PREFIX}${repo}/${thread}`;
 
 export function loadDraft(key: string): string {

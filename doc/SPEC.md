@@ -223,6 +223,12 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 - **檔案模式的對話列表只列這個檔的**(`chat:list:toggle` → 以 `link === 開著的檔` 過濾;
   正在看的那條一定留著,因為它可能還沒落檔)。右欄的身分就是「這個檔的對話」,把整個 repo
   的對話倒出來反而找不到東西。**對話模式**(`full`)才列全部。
+- **列表列與 topbar 都顯示綁的檔**(`chat:thread:item:link` / `chat:link`):太長的路徑把**前面**
+  收成 `…/<檔名>`(JS 算,不用 CSS `direction: rtl` 省略 —— 那招會把路徑裡的 `/` 當中性字元重排),
+  完整路徑放 `title`。點它 → 檔案模式打開那個檔:**對話模式另開分頁**(整頁都是對話,就地切模式
+  會把正在讀的對話收掉),檔案模式則就地導航。
+- **對話模式左右可拖**(`chat:list:grip`,做法同 tide 留言面板的 `.cp-grip`):左欄寬度記進
+  `localStorage`(`porthole.chat.listW`,下限 200px),雙擊回預設 280px。
 - **綁檔的對話可以改那個檔**:送出時 prompt 前綴一段脈絡區塊 ——
   ```
   [porthole 脈絡]

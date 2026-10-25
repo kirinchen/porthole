@@ -420,6 +420,35 @@ body {
   border-color: var(--accent, #3fb6c4);
 }
 
+/* 對話列表裡的「綁著哪個檔」列:點了另開分頁到檔案模式 */
+.ph-chat-linkrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted, #7d97a5);
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ph-chat-linkrow:hover {
+  color: var(--accent, #3fb6c4);
+  text-decoration: underline;
+}
+
+/* 對話模式:左欄(列表)與對話之間的拖桿。做法同 tide 的 .cp-grip。 */
+.ph-chat-grip {
+  flex: 0 0 auto;
+  width: 7px;
+  cursor: col-resize;
+  background: var(--line, #2a4452);
+}
+.ph-chat-grip:hover {
+  background: var(--accent-soft, rgba(63, 182, 196, 0.35));
+}
+
 /* ---- 捲軸(深色底的預設捲軸太亮) ---- */
 * {
   scrollbar-width: thin;
