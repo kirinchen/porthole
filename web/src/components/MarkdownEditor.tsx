@@ -840,6 +840,8 @@ const theme = EditorView.theme({
   },
   '&.cm-focused': { outline: 'none' },
   // 深色底下必須明寫游標 / 選取色 —— CM6 預設是亮底配色(黑游標、淺藍選取),會看不見。
+  // 兩種游標都要管:`.cm-cursor` 是 drawSelection 畫的;沒畫時用的是瀏覽器原生 caret,
+  // 顏色吃 `.cm-content` 的 caret-color(亮色 base theme 寫死 black,見下方 .cm-content)。
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)' },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
     backgroundColor: 'var(--accent-soft)',
@@ -857,7 +859,7 @@ const theme = EditorView.theme({
     lineHeight: '1.7',
     overflow: 'auto',
   },
-  '.cm-content': { padding: '4px 0', maxWidth: '860px' },
+  '.cm-content': { padding: '4px 0', maxWidth: '860px', caretColor: 'var(--accent)' },
   '.cm-line': { padding: '0 2px' },
   '.cm-h1': { fontSize: '1.8em', fontWeight: '700', lineHeight: '1.4' },
   '.cm-h2': { fontSize: '1.5em', fontWeight: '700', lineHeight: '1.4' },
@@ -876,7 +878,7 @@ const theme = EditorView.theme({
   },
   '.cm-link': { color: 'var(--accent)', textDecoration: 'underline', cursor: 'pointer' },
   '.cm-quote': { borderLeft: '3px solid var(--line)', paddingLeft: '12px', color: 'var(--muted)' },
-});
+}, { dark: true }); // dark:true → CM6 base theme 也改走深色變體(caret、選取、面板)
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(function MarkdownEditor(
   { value, onChange, initialLine, onImagePaste },
