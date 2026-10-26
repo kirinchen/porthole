@@ -7,6 +7,9 @@
  *    正常模式中間有拖把可調右側寬。手動佈局(非 Splitter)以確保三態切換時 Explore 不卸載。
  *  - **對話**(`#chat`):全頁對話 —— 左邊列全部對話,右邊是對話本體,不綁任何檔。
  *
+ *  窄螢幕(< lg,含手機直立 / 橫放與小平板)一律單窗格:檔案模式**不掛右側對話**,
+ *  要看對話就用 header 切到對話模式。
+ *
  *  active repo = URL path 第一段;模式進 URL hash。Session / CLI 兩個 Tab 已於 2026-10-25
  *  退場(PTY / tmux / WebSocket 全移除),舊的 `#session` / `#cli` 書籤落回 `#file`。
  */
@@ -58,6 +61,12 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
+  /**
+   * 檔案模式的三欄(檔案樹 + 預覽 + 綁檔對話)要夠寬才塞得下。手機直立是 `!md`,但**橫放**
+   * (844×390)與小平板會落在 md~lg 之間 —— 那時擠出一個右側對話欄只會把預覽壓扁。
+   * 低於 lg(992)就單窗格:檔案模式只給檔案,對話一律靠 header 切到對話模式看。
+   */
+  const narrow = !screens.lg;
 
   // 檔案模式:現在開著哪個檔 → 右側對話切到那個檔的綁檔對話。
   const [openFile, setOpenFile] = useState<string | null>(() => getCurrentFile()?.path ?? null);
@@ -358,8 +367,8 @@ export default function App() {
     <Chat repo={repo} isActive layout={isMobile ? 'panel' : 'full'} />
   );
 
-  // 手機單窗格:檔案模式顯示 Explore(對話靠切模式看),對話模式顯示對話。
-  const mobileBody = !repo ? (
+  // 窄螢幕單窗格:檔案模式只顯示 Explore(**不掛對話**),對話模式顯示對話。
+  const narrowBody = !repo ? (
     <Alert type="info" message="basePath 下沒有可用的 repo" />
   ) : mode === 'file' ? (
     <Explore repo={repo} />
@@ -372,7 +381,7 @@ export default function App() {
       {header}
       <Layout>
         <Content style={{ background: PALETTE.bg, overflow: 'hidden' }}>
-          {isMobile ? mobileBody : mode === 'file' ? fileBody : chatBody}
+          {narrow ? narrowBody : mode === 'file' ? fileBody : chatBody}
         </Content>
       </Layout>
     </Layout>
