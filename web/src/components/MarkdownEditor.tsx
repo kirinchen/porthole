@@ -11,7 +11,7 @@
  * 非 markdown 檔不走這裡(Explore 用純 textarea)。父層以 key=path 強制每檔重掛。
  */
 import { useEffect, useRef, useState, useImperativeHandle, forwardRef, createElement } from 'react';
-import { Modal, Input, message } from 'antd';
+import { Modal, Input, message, ConfigProvider } from 'antd';
 import {
   EditorView,
   Decoration,
@@ -25,6 +25,7 @@ import { EditorState, StateField, type Range } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { syntaxTree, ensureSyntaxTree, syntaxHighlighting } from '@codemirror/language';
 import { darkHighlightStyle } from '../lib/cmTheme';
+import { antdTheme } from '../theme';
 import { markdown } from '@codemirror/lang-markdown';
 import { Table } from '@lezer/markdown';
 import { CODE_LANGUAGES } from '../lib/codeLanguages';
@@ -137,6 +138,14 @@ function applyTableBlock(view: EditorView, index: number, newCode: string): void
   view.dispatch({ changes: { from: range.from, to: range.to, insert: newCode.replace(/\s+$/, '') } });
 }
 
+/**
+ * widget 是 CM6 裡另開的 React root,**不在 main.tsx 的 ConfigProvider 底下** → Antd 元件
+ * (表格 / 原始碼切換、新增列、圖型工具列…)會掉回預設淺色主題。每個 widget root 自己包一層。
+ */
+function themed(el: React.ReactElement): React.ReactElement {
+  return createElement(ConfigProvider, { theme: antdTheme }, el);
+}
+
 /** GFM 表格 → GUI 編輯 widget(React root 掛進 CM6 block widget)。 */
 class TableWidget extends WidgetType {
   constructor(
@@ -165,10 +174,12 @@ class TableWidget extends WidgetType {
     fitWidth();
     const root = createRoot(dom);
     root.render(
-      createElement(TableBlock, {
-        code: this.code,
-        onApply: (nc: string) => applyTableBlock(view, this.index, nc),
-      }),
+      themed(
+        createElement(TableBlock, {
+          code: this.code,
+          onApply: (nc: string) => applyTableBlock(view, this.index, nc),
+        }),
+      ),
     );
     // 觀察 dom(高度變化)+ scroller(窗格寬變化,如拉動分割線)→ 重量測 / 重算滿版寬。
     const ro = new ResizeObserver(() => {
@@ -216,12 +227,14 @@ class FenceWidget extends WidgetType {
     dom.setAttribute('data-loc', `explore:edit:${this.lang}`);
     const root = createRoot(dom);
     root.render(
-      createElement(FENCE_COMPONENT[this.lang], {
-        code: this.code,
-        onApply: (nc: string) => applyFenceBlock(view, this.lang, this.index, nc),
-        // 跨 remount 保留 GUI 狀態:存檔改寫文件 → widget 重建 → 元件 remount。
-        sessionKey: `${this.lang}:${this.index}`,
-      }),
+      themed(
+        createElement(FENCE_COMPONENT[this.lang], {
+          code: this.code,
+          onApply: (nc: string) => applyFenceBlock(view, this.lang, this.index, nc),
+          // 跨 remount 保留 GUI 狀態:存檔改寫文件 → widget 重建 → 元件 remount。
+          sessionKey: `${this.lang}:${this.index}`,
+        }),
+      ),
     );
     // mermaid/d2/excalidraw 為非同步渲染,widget 掛載後高度才確定;若不通知 CM6
     // 重新量測,其高度圖會過時 → widget 下方各行的座標↔位置對映偏掉(點該行游標

@@ -383,7 +383,7 @@ export default function TableBlock({ code, onApply }: Props) {
                             fontSize: 11,
                             lineHeight: '18px',
                             padding: 0,
-                            color: '#555',
+                            color: 'var(--muted)',
                           }}
                           data-loc="table:align"
                           data-c={c}
@@ -400,7 +400,8 @@ export default function TableBlock({ code, onApply }: Props) {
                             border: 'none',
                             background: 'transparent',
                             cursor: ncol <= 1 ? 'not-allowed' : 'pointer',
-                            color: ncol <= 1 ? '#ccc' : '#bbb',
+                            color: 'var(--muted)',
+                            opacity: ncol <= 1 ? 0.4 : 1,
                             padding: 0,
                             lineHeight: 1,
                           }}
@@ -503,7 +504,7 @@ export default function TableBlock({ code, onApply }: Props) {
             style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13 }}
             data-loc="table:raw"
           />
-          {rawErr && <div style={{ color: '#cf1322', fontSize: 12, marginTop: 4 }}>{rawErr}</div>}
+          {rawErr && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{rawErr}</div>}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
             <Button
               size="small"

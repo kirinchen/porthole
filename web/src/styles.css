@@ -18,6 +18,16 @@ body {
   color: var(--text, #d7e3ea);
 }
 
+/* 原生表單元件(表格格子的 <textarea> / <input> 等)預設**不繼承**文字色 → 瀏覽器給黑字,
+   在深色底上看不見。:where() 零權重:Antd 元件自己設的色照樣蓋過去,只補沒人管的原生元件。
+   color-scheme 讓原生捲軸 / 游標 / 選取框也走深色。 */
+:root {
+  color-scheme: dark;
+}
+:where(input, textarea, select, button) {
+  color: inherit;
+}
+
 /* ---- markdown 預覽:基本排版 ---- */
 .md-preview {
   line-height: 1.6;
