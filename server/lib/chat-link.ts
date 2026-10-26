@@ -101,3 +101,28 @@ export function linkContext(repo: string, rel: string): string {
     '若你改了檔,回報:改了什麼 → 為什麼 → 還有什麼沒做。\n\n'
   );
 }
+
+/**
+ * 訊息裡 tag 了哪些 agent(composer 的 `@<repo>`,SPEC §4.2 composer mention)。
+ * agent = basePath 下的兄弟 repo;只認 `repos` 裡真的有的、排除自己,依出現順序去重。
+ * `@` 要在行首或空白後(email、`a@b` 不算)。
+ */
+export function mentionedAgents(prompt: string, repos: readonly string[], self: string): string[] {
+  const known = new Set(repos);
+  const out: string[] = [];
+  for (const m of prompt.matchAll(/(?:^|\s)@([A-Za-z0-9._-]+)/g)) {
+    const name = m[1].replace(/[.]+$/, ''); // 句尾的 `.` 不算名字
+    if (name !== self && known.has(name) && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+/** 被 tag 的 agent → prompt 前綴脈絡(`@kelp` 就是 `../kelp` 那個 repo 的 agent)。沒 tag 回空字串。 */
+export function agentContext(agents: readonly string[]): string {
+  if (!agents.length) return '';
+  return (
+    '[porthole 提及的 agent]\n' +
+    agents.map((a) => `@${a} = ../${a}(那個 repo 的 agent;規則見 ../${a}/CLAUDE.md)`).join('\n') +
+    '\n\n'
+  );
+}

@@ -9,6 +9,8 @@ import {
   reslug,
   readLink,
   setLink,
+  mentionedAgents,
+  agentContext,
 } from './chat-link.ts';
 
 test('fileSlug:副檔名的點換成連字號', () => {
@@ -92,4 +94,16 @@ test('setLink:已有註記 → 取代,不會變兩行', () => {
 
 test('readLink:沒註記 → null', () => {
   assert.equal(readLink('# t\n\n## 🧑 Human · x\n'), null);
+});
+
+test('mentionedAgents:只認存在的兄弟 repo、排除自己、去重保序、句尾句點不算', () => {
+  const repos = ['coral', 'kelp', 'tide'];
+  assert.deepEqual(mentionedAgents('問 @tide 跟 @kelp,再 @tide 一次', repos, 'coral'), ['tide', 'kelp']);
+  assert.deepEqual(mentionedAgents('@coral 自己 / @nope / a@kelp', repos, 'coral'), []);
+  assert.deepEqual(mentionedAgents('交給 @kelp.', repos, 'coral'), ['kelp']);
+});
+
+test('agentContext:沒 tag 回空字串;有 tag 給 ../<repo> 對照', () => {
+  assert.equal(agentContext([]), '');
+  assert.match(agentContext(['kelp']), /@kelp = \.\.\/kelp/);
 });

@@ -24,7 +24,16 @@ import path from 'node:path';
 import { guard } from '../lib/path-guard.ts';
 import { runClaude, MODELS, EFFORTS, type ClaudeRun } from '../lib/claude-p.ts';
 import { safeThread, slugify, readH1, setH1, parseGenTitle } from '../lib/chat-title.ts';
-import { readLink, setLink, linkSuffix, linkedThreadName, reslug, linkContext } from '../lib/chat-link.ts';
+import {
+  readLink,
+  setLink,
+  linkSuffix,
+  linkedThreadName,
+  reslug,
+  linkContext,
+  mentionedAgents,
+  agentContext,
+} from '../lib/chat-link.ts';
 
 const CHAT_DIR = 'doc/chat';
 /** 檔頭讀多少就夠拿到 title + link(列表可能幾十個檔,不為兩行把整檔讀進來)。 */
@@ -150,6 +159,16 @@ async function listThreads(repoRoot: string): Promise<ThreadRow[]> {
   }
   rows.sort((a, b) => b.mtime - a.mtime);
   return rows;
+}
+
+/** basePath 下的 repo(= 可 tag 的 agent),規則同 `GET /api/repos`。 */
+async function listRepos(): Promise<string[]> {
+  try {
+    const entries = await fs.readdir(guard.base, { withFileTypes: true });
+    return entries.filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name);
+  } catch {
+    return [];
+  }
 }
 
 /** repo 相對路徑正規化(擋 `..`;真正的邊界仍由 path-guard 把關)。 */
@@ -339,8 +358,11 @@ export default async function chatRoutes(app: FastifyInstance) {
     // 帶上文:把先前對話 + 最新訊息一起給 claude -p(否則 stateless 沒記憶)。
     // 綁檔的再前綴一段脈絡區塊(開著哪個檔 / 可以改它 / 要回報)。
     // yolo:讓 chat agent 能實際用工具(否則多數功能被權限提示卡住);CWD 受 path-guard。
+    // composer 的 `@<repo>` = tag 那個兄弟 repo 的 agent → 補一段 `@x = ../x` 對照,
+    // 否則 claude 不知道 @kelp 指的是 CWD 外面哪個目錄。
     const body = buildContextPrompt(priorRaw, prompt);
-    const full = link ? linkContext(repo, link) + body : body;
+    const agents = mentionedAgents(prompt, await listRepos(), repo);
+    const full = (link ? linkContext(repo, link) : '') + agentContext(agents) + body;
     const run = runClaude(full, cwd, { yolo: true, model, effort });
     jobs.set(key, { state: 'running', startedAt: Date.now(), model, effort, run });
 

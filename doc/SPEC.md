@@ -170,7 +170,7 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
   agent 回覆裡的 ```mermaid / ```d2 照樣渲染成圖(共用 Explore 的 `Markdown` 元件;Chat 僅呈現,
   不提供 GUI 編輯)。`?turn=` 只在**換對話**時才從網址清掉,同一條對話要留著,否則 deep-link
   會被初次同步自己抹掉。
-- **composer**:`@` mention 檔案(見下)、⌘/Ctrl+Enter 送出、⚙ 展開參數、送出鈕。
+- **composer**:`@` tag agent / `.` 叫檔案(見下)、⌘/Ctrl+Enter 送出、⚙ 展開參數、送出鈕。
   **草稿自動存**(per thread,`localStorage`,debounce 400ms;換 thread 載該 thread 自己的草稿,
   送出成功才清)—— 刻意做在 onChange 而非 effect:換 thread 那一瞬間 value 還是舊的、key 已是新的,
   用 effect 會把 A 的草稿存到 B 名下(Tide 踩過)。
@@ -196,10 +196,17 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 - **手動改名**:topbar 改名鈕(`chat:rename`)→ 同 rename 端點帶 `{to}`。`{to}` 即**顯示標題**(可中文),一律寫入檔首 H1;**檔名取 `slugify({to})`**(與自動命名同一套 kebab-case:「3090 24G 價格走勢」→ `3090-24g`,而非 `safeThread` 逐字換底線的 `3090_24G_____`);slug 為空(純中文)→ 檔名維持原樣,只改標題。空 thread(尚無檔)則本地改名,下次訊息寫新檔。
 - 取代 `claude-workbench/plugins/chat`(該方案太難用,porthole 不沿用其機制)。
 - thread 列表:讀 `<repo>/doc/chat/*.md`。
-- **composer @ mention 檔案**:輸入框打 `@` 觸發檔案 hint 下拉(`data-loc="chat:composer:mention"`)。
-  - 選資料夾續查下一層、`../` 回上層;鍵盤 ↑↓ 選、Enter/Tab 選中、Esc 關(下拉關閉時 Enter 才送出)。
-  - 選檔案插入 `@<repo 相對路徑>`(claude -p 原生吃 `@file`)。
-  - 列檔複用 `GET /api/:repo/tree`;路徑導航受 path-guard 約束,超出 repo root → 403,下拉顯示「已到根」。
+- **composer mention**:兩種觸發,都要在行首或空白後(`foo.md`、`a@b` 不算),下拉同一個
+  (`data-loc="chat:composer:mention"`);鍵盤 ↑↓ 選、Enter/Tab 選中、Esc 關(下拉關閉時 Enter 換行)。
+  觸發偵測是純邏輯 `web/src/lib/mentionToken.ts`。
+  - **`@` = tag agent**:agent 就是 basePath 下的兄弟 repo(相對當前 repo 即 `../*`,不含自己),
+    選了插入 `@<repo> `。送出時後端掃訊息裡的 `@<repo>`(只認真的存在的 repo),在 prompt 前綴補一段
+    `@kelp = ../kelp` 對照(`mentionedAgents` / `agentContext`),否則 claude 不知道 `@kelp` 指哪。
+  - **`.` = 叫檔案**:`.` 列 repo 根、`./doc/` 續查、`.cl` 篩根目錄 dotfile;選資料夾續查下一層、
+    `..` 回上層;選檔案插入 `./<repo 相對路徑>`(CWD = repo root)。根目錄下沒對到任何檔(`...`、`.)`
+    這類標點)不跳空下拉。列檔複用 `GET /api/:repo/tree`;受 path-guard 約束,超出 repo root → 403,
+    下拉顯示「已到根」。
+  - 檔案編輯器(CM6)的 `@` / `#` 自動完成是另一套(`lib/mentionComplete`),不受此規則影響。
 
 #### 4.2.1 綁檔對話(file-linked chat)
 
