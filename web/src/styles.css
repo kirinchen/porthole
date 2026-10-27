@@ -478,3 +478,18 @@ body {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ---- React Flow(mermaid / d2 的 GUI 編輯器):colorMode="dark" 的中性灰換成主題色 ---- */
+.react-flow.dark {
+  --xy-background-color: var(--bg, #0e1a24);
+  --xy-background-pattern-color: var(--line, #2a4452);
+  --xy-minimap-background-color: var(--surface, #16242f);
+  --xy-minimap-mask-background-color: rgba(14, 26, 36, 0.6);
+  --xy-minimap-node-background-color: var(--line, #2a4452);
+  --xy-controls-button-background-color: var(--card, #1d3340);
+  --xy-controls-button-background-color-hover: var(--line, #2a4452);
+  --xy-controls-button-color: var(--text, #d7e3ea);
+  --xy-controls-button-border-color: var(--line, #2a4452);
+  --xy-edge-stroke: var(--muted, #7d97a5);
+  --xy-attribution-background-color: transparent;
+}

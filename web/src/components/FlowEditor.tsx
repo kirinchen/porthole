@@ -27,7 +27,14 @@ import '@xyflow/react/dist/style.css';
 import dagre from '@dagrejs/dagre';
 import { Button, Modal, Input, Select, Space, Typography } from 'antd';
 import { PlusOutlined, UndoOutlined, RedoOutlined } from '@ant-design/icons';
-import { parseFlow, serializeFlow, type FlowGraph, type FlowShape } from '../lib/mermaidFlow';
+import {
+  parseFlow,
+  serializeFlow,
+  nodeStyles,
+  type FlowGraph,
+  type FlowShape,
+  type FlowClassStyle,
+} from '../lib/mermaidFlow';
 
 const SHAPE_OPTS: { value: FlowShape; label: string }[] = [
   { value: 'rect', label: '矩形' },
@@ -35,19 +42,33 @@ const SHAPE_OPTS: { value: FlowShape; label: string }[] = [
   { value: 'diamond', label: '菱形(判斷)' },
 ];
 
+/** `#rgb` / `#rrggbb` 是不是淺色(相對亮度 > 0.6)。非 hex(具名色、rgb())一律當深色。 */
+function isLight(color: string): boolean {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color.trim());
+  if (!m) return false;
+  const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1];
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6;
+}
+
 /** 自訂節點:依 data.shape 用 SVG 畫矩形 / 圓角 / 菱形,標籤置中,上下接點。 */
 function ShapedNode({ data }: NodeProps) {
-  const d = data as { label?: string; shape?: FlowShape };
+  const d = data as { label?: string; shape?: FlowShape; look?: FlowClassStyle };
   const shape = d.shape ?? 'rect';
+  // classDef / style 的 fill / stroke / color;沒有就走主題色。淺色 fill 沒指定字色 → 深字,
+  // 不然主題的淺字壓在淺底上看不見。
+  const fill = d.look?.fill ?? 'var(--card)';
+  const stroke = d.look?.stroke ?? 'var(--muted)';
+  const textColor = d.look?.color ?? (d.look?.fill && isLight(d.look.fill) ? '#1a1a1a' : undefined);
   const w = NODE_W;
   const h = NODE_H;
   const shapeEl =
     shape === 'diamond' ? (
-      <polygon points={`${w / 2},1 ${w - 1},${h / 2} ${w / 2},${h - 1} 1,${h / 2}`} fill="var(--card)" stroke="var(--muted)" />
+      <polygon points={`${w / 2},1 ${w - 1},${h / 2} ${w / 2},${h - 1} 1,${h / 2}`} fill={fill} stroke={stroke} />
     ) : shape === 'round' ? (
-      <rect x="1" y="1" width={w - 2} height={h - 2} rx={h / 2} ry={h / 2} fill="var(--card)" stroke="var(--muted)" />
+      <rect x="1" y="1" width={w - 2} height={h - 2} rx={h / 2} ry={h / 2} fill={fill} stroke={stroke} />
     ) : (
-      <rect x="1" y="1" width={w - 2} height={h - 2} rx="4" fill="var(--card)" stroke="var(--muted)" />
+      <rect x="1" y="1" width={w - 2} height={h - 2} rx="4" fill={fill} stroke={stroke} />
     );
   return (
     <div style={{ position: 'relative', width: w, height: h }}>
@@ -63,6 +84,7 @@ function ShapedNode({ data }: NodeProps) {
           justifyContent: 'center',
           fontSize: 12,
           textAlign: 'center',
+          color: textColor,
           padding: shape === 'diamond' ? '0 22px' : '0 8px',
           boxSizing: 'border-box',
           overflow: 'hidden',
@@ -107,10 +129,11 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
 
   const init = useMemo(() => {
     const gph = parseFlow(code);
+    const looks = nodeStyles(gph);
     const ns: Node[] = gph.nodes.map((n) => ({
       id: n.id,
       type: 'shaped',
-      data: { label: n.label, shape: n.shape },
+      data: { label: n.label, shape: n.shape, classes: n.classes, look: looks.get(n.id) },
       position: { x: 0, y: 0 },
     }));
     const es: Edge[] = gph.edges.map((e, i) => ({
@@ -119,7 +142,7 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
       target: e.target,
       label: e.label,
     }));
-    return { dir: gph.dir, nodes: layout(ns, es, gph.dir), edges: es };
+    return { dir: gph.dir, nodes: layout(ns, es, gph.dir), edges: es, extras: gph.extras };
   }, [code]);
 
   const [nodes, setNodes] = useState<Node[]>(init.nodes);
@@ -318,12 +341,14 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
         id: n.id,
         label: String(n.data.label ?? n.id),
         shape: (n.data.shape as FlowShape) ?? 'rect',
+        classes: n.data.classes as string[] | undefined,
       })),
       edges: edges.map((e) => ({
         source: e.source,
         target: e.target,
         label: e.label ? String(e.label) : undefined,
       })),
+      extras: init.extras, // classDef / class / style… 原樣寫回(刪掉的節點由 serializeFlow 濾)
     };
     onSave(serializeFlow(g), { stay });
   };
@@ -374,6 +399,7 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
         data-loc="flow:canvas"
       >
         <ReactFlow
+          colorMode="dark"
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}

@@ -532,6 +532,7 @@ export default function ErdEditor({ code, onSave, onClose, fill }: Props) {
         data-loc="erd:canvas"
       >
         <ReactFlow
+          colorMode="dark"
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}

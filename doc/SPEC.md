@@ -139,6 +139,9 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
     套用直接改寫 CM6 文件對應區塊,隨檔案一起存。空白行右鍵選單可一鍵插入各圖型範例(GUI 可編輯)。
   - GUI 編輯器(節點圖型用 React Flow + dagre,共用:雙擊改字、拖把手連線、Delete 刪、新增、復原/重做、複製/貼上、全螢幕;「套用」正規化重寫並回 preview;**Ctrl+S / 儲存** = 存檔寫回磁碟但**留在編輯器**,跨 widget remount 以 sessionKey 保留 GUI 狀態):
     - **flowchart**(`mermaidFlow` + `FlowEditor`):矩形/圓角/菱形節點 + 有向邊 + 邊標籤 + 方向。
+      樣式語句(`classDef` / `class` / `style` / `linkStyle` / `click`)**不是節點**:原樣保留、存檔寫回
+      (引用到 GUI 刪掉的節點會濾掉,免得 mermaid 憑空生回來);`:::cls` 掛在節點上。GUI 照 classDef
+      的 fill / stroke / color 畫節點,淺色 fill 沒指定字色就用深字。
     - **state diagram**(`mermaidState` + `StateEditor`):狀態 + 起點/終點([*]) + 轉移標籤 + 方向。
     - **ERD**(`mermaidErd` + `ErdEditor`):實體(屬性 type/name/PK/FK/UK/註解)+ 關係(左右 cardinality + 識別/非識別 + 標籤)。
     - **class**(`mermaidClass` + `ClassEditor`):類別(stereotype + 成員 visibility/attr/method)+ 關係(繼承/組合/聚合/關聯/依賴/實現 + multiplicity + 標籤)。

@@ -775,6 +775,7 @@ export default function D2Editor({ code, onSave, onClose, fill }: Props) {
         data-loc="d2:canvas"
       >
         <ReactFlow
+          colorMode="dark"
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}

@@ -630,6 +630,7 @@ export default function ClassEditor({ code, onSave, onClose, fill }: Props) {
         data-loc="class:canvas"
       >
         <ReactFlow
+          colorMode="dark"
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}

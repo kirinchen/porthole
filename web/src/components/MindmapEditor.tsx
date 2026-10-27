@@ -531,6 +531,7 @@ export default function MindmapEditor({ code, onSave, onClose, fill }: Props) {
         data-loc="mindmap:canvas"
       >
         <ReactFlow
+          colorMode="dark"
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}

@@ -416,6 +416,7 @@ export default function StateEditor({ code, onSave, onClose, fill }: Props) {
         data-loc="state:canvas"
       >
         <ReactFlow
+          colorMode="dark"
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}

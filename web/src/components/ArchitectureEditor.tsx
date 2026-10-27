@@ -880,6 +880,7 @@ export default function ArchitectureEditor({ code, onSave, onClose, fill }: Prop
         data-loc="arch:canvas"
       >
         <ReactFlow
+          colorMode="dark"
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
