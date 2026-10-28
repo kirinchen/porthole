@@ -37,6 +37,7 @@ import {
   AutoComplete,
   Table,
   Segmented,
+  message,
 } from 'antd';
 import type { TreeDataNode } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -183,6 +184,12 @@ function previewTopHeadingIndex(): number {
     if (h.getBoundingClientRect().top <= top + tol) idx = i;
   });
   return idx;
+}
+
+/** 不能預覽的檔:直接下載 + 一行提示(取代開檔)。 */
+function downloadInstead(repo: string, filePath: string) {
+  triggerDownload(repo, filePath);
+  void message.info(`${filePath.split('/').pop()} 無法預覽,已直接下載`);
 }
 
 /** 觸發瀏覽器下載某檔(隱藏 a[download] 指向 attachment endpoint,path-guard 在後端)。 */
@@ -524,6 +531,8 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
   }, [folderView]);
   // VSCode 式多分頁:開啟的檔案路徑清單(有序);active = selPath。
   const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const openTabsRef = useRef(openTabs); // navigateTo(useCallback)要讀最新的已開分頁
+  openTabsRef.current = openTabs;
   const selPathRef = useRef<string | null>(null); // noteOpenTab「取代目前分頁」需讀切換前的 active
   useEffect(() => {
     selPathRef.current = selPath;
@@ -763,6 +772,22 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
 
   const onSelect = async (_keys: React.Key[], info: { node: TreeDataNode }) => {
     const n = info.node as Node;
+    // 不能預覽的檔(二進位 / > 2MB 文字)→ 點了**直接下載**,不開分頁、不換掉目前畫面。
+    // 所以要先探一次 /file 才動任何狀態;探到的內容下面直接沿用,不重抓。
+    let pre: Awaited<ReturnType<typeof api.file>> | undefined;
+    if (n.isLeaf && !mediaKind(n.path)) {
+      setLoadingFile(true);
+      try {
+        pre = await api.file(repo, n.path);
+      } catch (e) {
+        if (isUnreadable(e)) {
+          setLoadingFile(false);
+          downloadInstead(repo, n.path);
+          return;
+        }
+        // 其他錯照原流程走,下面會再試一次並顯示錯誤
+      }
+    }
     snapshotActiveTab(); // 切走前記下目前分頁的編輯狀態 / 未存草稿
     setSelPath(n.path);
     setSelectedKeys([n.path]);
@@ -789,7 +814,7 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     }
     setLoadingFile(true);
     try {
-      const f = await api.file(repo, n.path);
+      const f = pre ?? (await api.file(repo, n.path));
       setSel({ path: n.path, content: f.content, markdown: f.markdown, excalidraw: isExcalidraw(n.path), env: isEnv(n.path) });
       setCurrentFile({ path: n.path, content: f.content }); // 供 ContentPick 推算行號
       setDrawerOpen(false); // 手機:選檔後關抽屜露出預覽
@@ -895,7 +920,13 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
         if (section && f.markdown) scrollSectionWhenReady(section, p);
         return;
       } catch (e) {
-        // 檔案在、只是二進位 / 太大 → 開成「無法預覽 + 下載」;其他錯才當「不是檔案 → 試資料夾」。
+        // 檔案在、只是二進位 / 太大:使用者點連結開新檔(push 且還沒開成分頁)→ 直接下載、
+        // 畫面不動;deep-link 載入 / 切回既有分頁 → 開成「無法預覽 + 下載」(重整不該一直觸發下載)。
+        // 其他錯才當「不是檔案 → 試資料夾」。
+        if (isUnreadable(e) && push && !openTabsRef.current.includes(p)) {
+          downloadInstead(repo, p);
+          return;
+        }
         if (isUnreadable(e)) {
           noteOpenTab(p, tabMode);
           setFolderView(null);
