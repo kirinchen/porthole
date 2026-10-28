@@ -8,11 +8,11 @@
  */
 import type { FastifyInstance } from 'fastify';
 import fs from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { guard } from '../lib/path-guard.ts';
 
 const MAX_FILE = 2 * 1024 * 1024; // 2MB 上限,避免讀爆
-const MAX_RAW = 25 * 1024 * 1024; // raw 串流上限(圖片等)
 
 // 原始串流的 content-type(主要給圖片);其餘 application/octet-stream。
 const MIME: Record<string, string> = {
@@ -25,7 +25,40 @@ const MIME: Record<string, string> = {
   '.bmp': 'image/bmp',
   '.ico': 'image/x-icon',
   '.avif': 'image/avif',
+  // 媒體:預覽區用 <audio> / <video> / <iframe> 直接吃 raw(支援 Range 才能拖進度條)
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.flac': 'audio/flac',
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.pdf': 'application/pdf',
 };
+
+/**
+ * `Range: bytes=a-b` → [start, end](含)。不支援 / 超出 → null(呼叫端回 416)。
+ * 只處理單一區段;`bytes=-500`(尾端 500)與 `bytes=500-`(到尾)都吃。
+ */
+function parseRange(header: string, size: number): [number, number] | null {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!m || (m[1] === '' && m[2] === '')) return null;
+  let start: number;
+  let end: number;
+  if (m[1] === '') {
+    start = Math.max(0, size - Number(m[2]));
+    end = size - 1;
+  } else {
+    start = Number(m[1]);
+    end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
+  }
+  return start <= end && start < size ? [start, end] : null;
+}
 
 interface Entry {
   name: string;
@@ -193,30 +226,50 @@ export default async function fsRoutes(app: FastifyInstance) {
       if (st.size > MAX_FILE) {
         return reply.code(413).send({ error: 'file too large' });
       }
-      const content = await fs.readFile(target, 'utf8');
+      const buf = await fs.readFile(target);
+      // 二進位(前 8KB 有 NUL)不當文字回 —— 前端改顯示「無法預覽 + 下載」,不是一坨亂碼。
+      if (buf.subarray(0, 8192).includes(0)) {
+        return reply.code(415).send({ error: 'binary file' });
+      }
+      const content = buf.toString('utf8');
       const ext = path.extname(target).toLowerCase();
       const markdown = ext === '.md' || ext === '.markdown';
       return { content, markdown, ext };
     },
   );
 
-  // 原始位元組串流(圖片預覽用 <img src>)。path-guard;依副檔名給 content-type。
+  // 原始位元組(圖片 <img>、<audio> / <video>、PDF、下載)。path-guard;依副檔名給 content-type。
+  // **串流 + Range**:不整檔讀進記憶體,所以不設大小上限(33MB 的 wav 也照下);
+  // <audio> / <video> 拖進度條靠 Range(206)。
   app.get<{ Params: { repo: string }; Querystring: { path?: string; download?: string } }>(
     '/api/:repo/raw',
     async (req, reply) => {
       const target = guard.resolveInRepo(req.params.repo, req.query.path ?? '');
       const st = await fs.stat(target);
       if (st.isDirectory()) return reply.code(400).send({ error: 'is a directory' });
-      if (st.size > MAX_RAW) return reply.code(413).send({ error: 'file too large' });
-      const buf = await fs.readFile(target);
       reply.header('content-type', MIME[path.extname(target).toLowerCase()] ?? 'application/octet-stream');
       reply.header('cache-control', 'no-cache');
-      // ?download=1 → 強制下載(attachment)+ 帶檔名(RFC5987,支援中文);否則 inline(圖片預覽)。
+      reply.header('accept-ranges', 'bytes');
+      // ?download=1 → 強制下載(attachment)+ 帶檔名(RFC5987,支援中文);否則 inline(預覽)。
       if (req.query.download === '1' || req.query.download === 'true') {
         const fname = path.basename(target);
         reply.header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fname)}`);
       }
-      return reply.send(buf);
+      const range = req.headers.range;
+      if (range) {
+        const r = parseRange(range, st.size);
+        if (!r) {
+          reply.header('content-range', `bytes */${st.size}`);
+          return reply.code(416).send();
+        }
+        const [start, end] = r;
+        reply.code(206);
+        reply.header('content-range', `bytes ${start}-${end}/${st.size}`);
+        reply.header('content-length', end - start + 1);
+        return reply.send(createReadStream(target, { start, end }));
+      }
+      reply.header('content-length', st.size);
+      return reply.send(createReadStream(target));
     },
   );
 

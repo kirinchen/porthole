@@ -82,13 +82,23 @@ interface Selected {
   content: string;
   markdown: boolean;
   isNew?: boolean; // 新檔尚未存到磁碟
-  image?: boolean; // 圖片檔(以 <img> 預覽,不抓文字內容)
+  /** 不抓文字內容、直接吃 raw 的檔:圖片 / 音訊 / 影片 / PDF 內嵌預覽;binary = 無法預覽只給下載。 */
+  media?: MediaKind;
   excalidraw?: boolean; // .excalidraw 檔(自由白板,以 Excalidraw 編輯器開)
   env?: boolean; // .env 檔(預覽美化成 KEY/VALUE 表)
 }
 
-const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i;
-const isImage = (p: string) => IMAGE_EXT.test(p);
+type MediaKind = 'image' | 'audio' | 'video' | 'pdf' | 'binary';
+const MEDIA_EXT: [MediaKind, RegExp][] = [
+  ['image', /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i],
+  ['audio', /\.(mp3|wav|ogg|oga|opus|m4a|aac|flac)$/i],
+  ['video', /\.(mp4|m4v|webm|mov)$/i],
+  ['pdf', /\.pdf$/i],
+];
+/** 依副檔名判斷要不要走 raw 預覽;一般文字檔回 null。 */
+const mediaKind = (p: string): MediaKind | null => MEDIA_EXT.find(([, re]) => re.test(p))?.[0] ?? null;
+/** api.file 的這兩種錯 = 檔案在、只是不能當文字開 → 顯示「無法預覽 + 下載」,不是報錯。 */
+const isUnreadable = (e: unknown) => /^(binary file|file too large)$/.test((e as Error)?.message ?? '');
 const isExcalidraw = (p: string) => /\.excalidraw$/i.test(p);
 /** .env / .env.* / *.env(dotenv 類)→ 預覽走 EnvView 美化。 */
 const isEnv = (p: string) => {
@@ -768,10 +778,11 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
     setErr(null);
     setSaveErr(null);
     setNote(null);
-    // 圖片:不抓文字內容,直接以 <img> 預覽。
-    if (isImage(n.path)) {
+    // 圖片 / 音訊 / 影片 / PDF:不抓文字內容,直接吃 raw 預覽。
+    const kind = mediaKind(n.path);
+    if (kind) {
       setEditing(false);
-      setSel({ path: n.path, content: '', markdown: false, image: true });
+      setSel({ path: n.path, content: '', markdown: false, media: kind });
       setCurrentFile(null);
       setDrawerOpen(false);
       return;
@@ -792,8 +803,14 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
         setEditing(false);
       }
     } catch (e) {
-      setErr((e as Error).message);
       setEditing(false);
+      if (isUnreadable(e)) {
+        setSel({ path: n.path, content: '', markdown: false, media: 'binary' });
+        setCurrentFile(null);
+        setDrawerOpen(false);
+      } else {
+        setErr((e as Error).message);
+      }
     } finally {
       setLoadingFile(false);
     }
@@ -835,13 +852,14 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       const p = rawPath.replace(/^\/+|\/+$/g, '');
       if (!p) return;
       snapshotActiveTab(); // 切走前先記下目前分頁的編輯狀態 / 未存草稿
-      // 圖片:不抓文字,直接 <img> 預覽(圖片必為檔案)。
-      if (isImage(p)) {
+      // 圖片 / 音訊 / 影片 / PDF:不抓文字,直接吃 raw 預覽(必為檔案)。
+      const kind = mediaKind(p);
+      if (kind) {
         noteOpenTab(p, tabMode);
         setFolderView(null);
         setEditing(false);
         setErr(null);
-        setSel({ path: p, content: '', markdown: false, image: true });
+        setSel({ path: p, content: '', markdown: false, media: kind });
         setCurrentFile(null);
         setSelPath(p);
         setBaseDir(parentDir(p));
@@ -876,8 +894,23 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
         writeUrl(p, tab, push, section);
         if (section && f.markdown) scrollSectionWhenReady(section, p);
         return;
-      } catch {
-        /* 不是檔案 → 試資料夾 */
+      } catch (e) {
+        // 檔案在、只是二進位 / 太大 → 開成「無法預覽 + 下載」;其他錯才當「不是檔案 → 試資料夾」。
+        if (isUnreadable(e)) {
+          noteOpenTab(p, tabMode);
+          setFolderView(null);
+          setEditing(false);
+          setErr(null);
+          setSel({ path: p, content: '', markdown: false, media: 'binary' });
+          setCurrentFile(null);
+          setSelPath(p);
+          setBaseDir(parentDir(p));
+          setDrawerOpen(false);
+          await revealAncestors(p);
+          setSelectedKeys([p]);
+          writeUrl(p, tab, push);
+          return;
+        }
       }
       // 資料夾:展開 + 反白 + 中央顯示 grid + README(不開檔)
       try {
@@ -1177,8 +1210,8 @@ export function ExploreProvider({ repo, children }: { repo: string; children: Re
       setNote('內容已可能被外部改動,但有未儲存編輯 → 未重載(請先儲存或取消編輯)');
       return;
     }
-    if (sel.image) {
-      setReloadSeq((n) => n + 1); // 圖片:換 src cache-bust 重抓
+    if (sel.media) {
+      setReloadSeq((n) => n + 1); // raw 預覽(圖片 / 媒體):換 src cache-bust 重抓
       return;
     }
     const path = sel.path;
@@ -1902,6 +1935,55 @@ function TabStrip() {
 }
 
 /** 預覽 / 編輯(中央主區)。 */
+/** raw 預覽:圖片 / 音訊 / 影片 / PDF 內嵌;binary(二進位或 > 2MB 的文字)只給下載。 */
+function MediaPreview({
+  kind,
+  src,
+  path,
+  onDownload,
+}: {
+  kind: MediaKind;
+  src: string;
+  path: string;
+  onDownload: () => void;
+}) {
+  const name = basename(path);
+  if (kind === 'image') {
+    return (
+      <img src={src} alt={path} style={{ maxWidth: '100%', height: 'auto', display: 'block' }} data-loc="explore:image" />
+    );
+  }
+  if (kind === 'audio') {
+    return (
+      <div style={{ padding: 16 }} data-loc="explore:audio">
+        <div style={{ marginBottom: 8, color: 'var(--muted)' }}>{name}</div>
+        <audio controls preload="metadata" src={src} style={{ width: '100%', maxWidth: 640 }} />
+      </div>
+    );
+  }
+  if (kind === 'video') {
+    return (
+      <video
+        controls
+        preload="metadata"
+        src={src}
+        style={{ maxWidth: '100%', maxHeight: '80vh', display: 'block' }}
+        data-loc="explore:video"
+      />
+    );
+  }
+  if (kind === 'pdf') {
+    return <iframe src={src} title={name} style={{ width: '100%', height: '80vh', border: 0 }} data-loc="explore:pdf" />;
+  }
+  return (
+    <Empty description={`${name} 無法預覽(二進位或超過 2MB)`} data-loc="explore:binary">
+      <Button icon={<DownloadOutlined />} onClick={onDownload}>
+        下載
+      </Button>
+    </Empty>
+  );
+}
+
 export function ExplorePreview() {
   const c = useExplore();
   const [imgOpen, setImgOpen] = useState(false); // 插入圖片 dialog
@@ -1981,7 +2063,7 @@ export function ExplorePreview() {
             </Button>
           )}
           {c.sel &&
-            !c.sel.image &&
+            !c.sel.media &&
             !c.sel.excalidraw &&
             (c.editing ? (
               <Space.Compact>
@@ -2149,12 +2231,12 @@ export function ExplorePreview() {
               fill
             />
           </Suspense>
-        ) : c.sel.image ? (
-          <img
+        ) : c.sel.media ? (
+          <MediaPreview
+            kind={c.sel.media}
             src={`${api.rawUrl(c.repo, c.sel.path)}&v=${c.reloadSeq}`}
-            alt={c.sel.path}
-            style={{ maxWidth: '100%', height: 'auto', display: 'block' }}
-            data-loc="explore:image"
+            path={c.sel.path}
+            onDownload={() => c.sel && c.downloadFile(c.sel.path)}
           />
         ) : c.sel.env ? (
           <EnvView content={c.sel.content} />
