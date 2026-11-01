@@ -10,6 +10,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': { target: 'http://127.0.0.1:4321', changeOrigin: true },
+      '/run': { target: 'http://127.0.0.1:4321', changeOrigin: true },
     },
   },
   build: { outDir: 'dist' },

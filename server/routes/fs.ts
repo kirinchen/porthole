@@ -6,11 +6,12 @@
  * PUT /api/:repo/file                寫檔(body {path, content};可覆寫既存或新增)
  * 全部經 path-guard;逃逸 → 403。寫入面鎖在 active repo root 內(SPEC §2)。
  */
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { guard } from '../lib/path-guard.ts';
+import { sandboxCsp } from '../lib/sandbox.ts';
 
 const MAX_FILE = 2 * 1024 * 1024; // 2MB 上限,避免讀爆
 
@@ -39,6 +40,15 @@ const MIME: Record<string, string> = {
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',
   '.pdf': 'application/pdf',
+  // HTML 原型「▶ 執行」(/run)與它引用的資源。HTML 一律帶 CSP sandbox(lib/sandbox.ts)。
+  '.html': 'text/html; charset=utf-8',
+  '.htm': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.wasm': 'application/wasm',
+  '.txt': 'text/plain; charset=utf-8',
 };
 
 /**
@@ -241,37 +251,60 @@ export default async function fsRoutes(app: FastifyInstance) {
   // 原始位元組(圖片 <img>、<audio> / <video>、PDF、下載)。path-guard;依副檔名給 content-type。
   // **串流 + Range**:不整檔讀進記憶體,所以不設大小上限(33MB 的 wav 也照下);
   // <audio> / <video> 拖進度條靠 Range(206)。
+  // HTML / SVG 帶 CSP sandbox(不同源,碰不到 /api);nosniff 避免瀏覽器把 octet-stream 猜成 HTML。
+  async function sendRaw(
+    target: string,
+    req: FastifyRequest,
+    reply: FastifyReply,
+    opts: { download: boolean; run: boolean },
+  ) {
+    const st = await fs.stat(target);
+    if (st.isDirectory()) return reply.code(400).send({ error: 'is a directory' });
+    const ext = path.extname(target).toLowerCase();
+    reply.header('content-type', MIME[ext] ?? 'application/octet-stream');
+    reply.header('cache-control', 'no-cache');
+    reply.header('accept-ranges', 'bytes');
+    reply.header('x-content-type-options', 'nosniff');
+    const csp = sandboxCsp(ext, opts.run);
+    if (csp) reply.header('content-security-policy', csp);
+    // download → 強制下載(attachment)+ 帶檔名(RFC5987,支援中文);否則 inline(預覽)。
+    if (opts.download) {
+      const fname = path.basename(target);
+      reply.header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fname)}`);
+    }
+    const range = req.headers.range;
+    if (range) {
+      const r = parseRange(range, st.size);
+      if (!r) {
+        reply.header('content-range', `bytes */${st.size}`);
+        return reply.code(416).send();
+      }
+      const [start, end] = r;
+      reply.code(206);
+      reply.header('content-range', `bytes ${start}-${end}/${st.size}`);
+      reply.header('content-length', end - start + 1);
+      return reply.send(createReadStream(target, { start, end }));
+    }
+    reply.header('content-length', st.size);
+    return reply.send(createReadStream(target));
+  }
+
   app.get<{ Params: { repo: string }; Querystring: { path?: string; download?: string } }>(
     '/api/:repo/raw',
     async (req, reply) => {
       const target = guard.resolveInRepo(req.params.repo, req.query.path ?? '');
-      const st = await fs.stat(target);
-      if (st.isDirectory()) return reply.code(400).send({ error: 'is a directory' });
-      reply.header('content-type', MIME[path.extname(target).toLowerCase()] ?? 'application/octet-stream');
-      reply.header('cache-control', 'no-cache');
-      reply.header('accept-ranges', 'bytes');
-      // ?download=1 → 強制下載(attachment)+ 帶檔名(RFC5987,支援中文);否則 inline(預覽)。
-      if (req.query.download === '1' || req.query.download === 'true') {
-        const fname = path.basename(target);
-        reply.header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fname)}`);
-      }
-      const range = req.headers.range;
-      if (range) {
-        const r = parseRange(range, st.size);
-        if (!r) {
-          reply.header('content-range', `bytes */${st.size}`);
-          return reply.code(416).send();
-        }
-        const [start, end] = r;
-        reply.code(206);
-        reply.header('content-range', `bytes ${start}-${end}/${st.size}`);
-        reply.header('content-length', end - start + 1);
-        return reply.send(createReadStream(target, { start, end }));
-      }
-      reply.header('content-length', st.size);
-      return reply.send(createReadStream(target));
+      const download = req.query.download === '1' || req.query.download === 'true';
+      return sendRaw(target, req, reply, { download, run: false });
     },
   );
+
+  // 執行網址(可分享):/run/<repo>/<路徑>。路徑式 → 原型裡的相對引用(./game.js、img/x.png)
+  // 照樣解析到同一個 repo 底下。一律 CSP sandbox(opaque origin)。不放 /api 下:sandbox 文件
+  // 載自己的資源是跨站請求,/api 會擋(index.ts);/run 只讀,path-guard 照樣把關。
+  app.get<{ Params: { repo: string; '*': string } }>('/run/:repo/*', async (req, reply) => {
+    const target = guard.resolveInRepo(req.params.repo, req.params['*'] ?? '');
+    return sendRaw(target, req, reply, { download: false, run: true });
+  });
 
   // 寫檔:path-guard 鎖在 repo root 內;可覆寫既存或新增(含建中間目錄)。
   // encoding=base64 → 寫二進位(上傳檔用);否則當 utf8 文字。

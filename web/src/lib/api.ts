@@ -76,6 +76,13 @@ export const api = {
   rawUrl: (repo: string, path: string) =>
     `/api/${encodeURIComponent(repo)}/raw?path=${encodeURIComponent(path)}`,
 
+  /**
+   * HTML 原型執行網址(可分享):`/run/<repo>/<路徑>`。後端一律帶 CSP sandbox → opaque origin,
+   * 碰不到 porthole 的 /api(SPEC §2)。路徑式,原型裡的相對引用照樣解析。
+   */
+  runUrl: (repo: string, path: string) =>
+    `/run/${encodeURIComponent(repo)}/${path.split('/').map(encodeURIComponent).join('/')}`,
+
   /** 下載 URL(attachment,帶檔名);給 <a download> 觸發瀏覽器下載。 */
   downloadUrl: (repo: string, path: string) =>
     `/api/${encodeURIComponent(repo)}/raw?path=${encodeURIComponent(path)}&download=1`,

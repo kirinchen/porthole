@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { PathGuardError, guard } from './lib/path-guard.ts';
+import { untrustedApiRequest } from './lib/sandbox.ts';
 import fsRoutes from './routes/fs.ts';
 import chatRoutes from './routes/chat.ts';
 import d2Routes from './routes/d2.ts';
@@ -31,6 +32,14 @@ app.setErrorHandler((err: Error & { statusCode?: number }, _req, reply) => {
   const status = err.statusCode ?? 500;
   app.log.error(err);
   return reply.code(status).send({ error: err.message });
+});
+
+// /api 只收 porthole 自己頁面的請求:HTML 原型在 sandbox(opaque origin)裡跑,它送的
+// simple request 不必過 CORS preflight 就會到後端 → 在這裡擋(SPEC §2,lib/sandbox.ts)。
+app.addHook('onRequest', async (req, reply) => {
+  if (req.raw.url?.startsWith('/api') && untrustedApiRequest(req.headers)) {
+    return reply.code(403).send({ error: 'cross-origin request blocked' });
+  }
 });
 
 // 路由

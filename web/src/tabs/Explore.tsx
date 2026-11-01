@@ -62,6 +62,9 @@ import {
   DownloadOutlined,
   SearchOutlined,
   PictureOutlined,
+  CaretRightOutlined,
+  CodeOutlined,
+  ExportOutlined,
 } from '@ant-design/icons';
 import { api, type TreeItem, type SearchFile } from '../lib/api';
 import Markdown from '../components/Markdown';
@@ -117,6 +120,10 @@ function toNode(item: { name: string; path: string; type: 'dir' | 'file' }): Nod
 }
 
 const isMd = (p: string) => /\.(md|markdown)$/i.test(p);
+/** HTML 原型:可「▶ 執行」(sandbox iframe,見 api.runUrl)。 */
+const isHtml = (p: string) => /\.html?$/i.test(p);
+/** iframe 的 sandbox;要跟後端 lib/sandbox.ts 的 RUN_SANDBOX 一致 —— **不給 allow-same-origin**。 */
+const RUN_SANDBOX = 'allow-scripts allow-modals allow-pointer-lock';
 
 /** bytes → 人性化(資料夾傳 undefined → '—')。 */
 function fmtBytes(n: number | undefined): string {
@@ -2018,6 +2025,12 @@ function MediaPreview({
 export function ExplorePreview() {
   const c = useExplore();
   const [imgOpen, setImgOpen] = useState(false); // 插入圖片 dialog
+  // HTML 原型:原始碼 ⇄ 執行。換檔就回原始碼(別讓下一個 HTML 一開就跑)。
+  const [running, setRunning] = useState(false);
+  const selPath = c.sel?.path;
+  useEffect(() => setRunning(false), [selPath]);
+  const runnable = !!c.sel && !c.sel.isNew && !c.editing && isHtml(c.sel.path);
+  const run = runnable && running;
   // 空白行右鍵選單「插入圖片」→ 派 porthole:insert-image → 開同一 dialog。
   useEffect(() => {
     const onOpen = () => setImgOpen(true);
@@ -2070,6 +2083,27 @@ export function ExplorePreview() {
           )}
           {c.sel?.markdown && !c.editing && (
             <Outline text={c.sel.content} onJump={jumpHeading} />
+          )}
+          {runnable && c.sel && (
+            <Space.Compact>
+              <Button
+                type={run ? 'default' : 'primary'}
+                icon={run ? <CodeOutlined /> : <CaretRightOutlined />}
+                onClick={() => setRunning((r) => !r)}
+                title={run ? '回到原始碼' : '在隔離的 sandbox 裡執行(碰不到 porthole 的 API)'}
+                data-loc="explore:run:toggle"
+              >
+                {run ? '原始碼' : '執行'}
+              </Button>
+              <Button
+                icon={<ExportOutlined />}
+                href={api.runUrl(c.repo, c.sel.path)}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="在新分頁執行(可分享的網址)"
+                data-loc="explore:run:open"
+              />
+            </Space.Compact>
           )}
           {c.sel && !c.sel.isNew && !c.editing && (
             <Button
@@ -2142,8 +2176,8 @@ export function ExplorePreview() {
         style={{
           flex: 1,
           minWidth: 0,
-          overflow: (c.editing && c.sel?.markdown) || c.sel?.excalidraw ? 'hidden' : 'auto',
-          padding: (c.editing && c.sel?.markdown) || c.sel?.excalidraw ? 0 : 16,
+          overflow: (c.editing && c.sel?.markdown) || c.sel?.excalidraw || run ? 'hidden' : 'auto',
+          padding: (c.editing && c.sel?.markdown) || c.sel?.excalidraw || run ? 0 : 16,
         }}
         data-loc="explore:preview:scroll"
       >
@@ -2253,6 +2287,15 @@ export function ExplorePreview() {
           </div>
         ) : !c.sel ? (
           <Empty description="選一個檔案預覽" />
+        ) : run ? (
+          <iframe
+            key={`${c.sel.path}:${c.reloadSeq}`}
+            src={api.runUrl(c.repo, c.sel.path)}
+            sandbox={RUN_SANDBOX}
+            title={c.sel.path}
+            style={{ width: '100%', height: '100%', border: 0, display: 'block', background: '#fff' }}
+            data-loc="explore:run:frame"
+          />
         ) : c.sel.excalidraw ? (
           <Suspense fallback={<Spin />}>
             <ExcalidrawEditor
