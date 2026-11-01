@@ -57,6 +57,8 @@ interface Job {
   model?: string;
   effort?: string;
   run: ClaudeRun;
+  /** 被 DELETE 中斷過 → 落檔時標「已中斷」,不寫成一則空的 Assistant turn。 */
+  aborted?: boolean;
 }
 const jobs = new Map<string, Job>();
 const jobKey = (repo: string, thread: string) => `${repo}\u0000${thread}`;
@@ -65,6 +67,12 @@ const jobKey = (repo: string, thread: string) => `${repo}\u0000${thread}`;
 function jobView(j: Job | undefined) {
   if (!j) return null;
   return { state: j.state, startedAt: j.startedAt, model: j.model ?? null, effort: j.effort ?? null };
+}
+
+/** 落檔的 Assistant 內容:被中斷的輪標「已中斷」(沒任何輸出時不留一則空 turn)。 */
+function assistantText(text: string, aborted: boolean): string {
+  if (!aborted) return text;
+  return text.trim() ? `${text}\n\n_(已中斷)_` : '_(已中斷,沒有回覆)_';
 }
 
 /**
@@ -242,6 +250,7 @@ export default async function chatRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const j = jobs.get(jobKey(req.params.repo, safeThread(req.params.thread)));
       if (!j) return reply.code(404).send({ error: 'no running job' });
+      j.aborted = true;
       j.run.abort();
       return { ok: true };
     },
@@ -364,7 +373,8 @@ export default async function chatRoutes(app: FastifyInstance) {
     const agents = mentionedAgents(prompt, await listRepos(), repo);
     const full = (link ? linkContext(repo, link) : '') + agentContext(agents) + body;
     const run = runClaude(full, cwd, { yolo: true, model, effort });
-    jobs.set(key, { state: 'running', startedAt: Date.now(), model, effort, run });
+    const job: Job = { state: 'running', startedAt: Date.now(), model, effort, run };
+    jobs.set(key, job);
 
     // **client 斷線不 kill 子程序**:關分頁 / 重整 / 切去別的 thread 都要讓這輪跑完並 append
     // 到檔案(SPEC §4.2「切走那輪不中斷」)。要停就明確打 DELETE /chat/jobs/:thread。
@@ -380,11 +390,11 @@ export default async function chatRoutes(app: FastifyInstance) {
       run.onEnd(async (code) => {
         jobs.delete(key);
         try {
-          await fs.appendFile(file, `\n## 🤖 Assistant · ${nowIso()}\n\n${assistant}\n`);
+          await fs.appendFile(file, `\n## 🤖 Assistant · ${nowIso()}\n\n${assistantText(assistant, !!job.aborted)}\n`);
         } catch {
           /* 寫檔失敗不阻斷回應 */
         }
-        send('done', { code });
+        send('done', { code, aborted: !!job.aborted, text: assistantText(assistant, !!job.aborted) });
         try {
           reply.raw.end();
         } catch {

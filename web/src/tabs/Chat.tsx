@@ -125,6 +125,9 @@ const fmtAt = (iso: string) => {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 };
 
+/** 送出後中斷鈕先鎖住多久(防連點誤觸)。 */
+const STOP_GUARD_MS = 1500;
+
 export default function Chat({ repo, isActive, layout = 'panel', linkPath }: Props) {
   const [threads, setThreads] = useState<ThreadMeta[]>([]);
   const [active, setActive] = useState<string>(() => threadFromUrl() ?? 'default');
@@ -141,6 +144,9 @@ export default function Chat({ repo, isActive, layout = 'panel', linkPath }: Pro
   const [job, setJob] = useState<ChatJob | null>(null);
   // registry 查不到(後端重啟過)但檔尾是 Human turn → 可能還在跑,退回檔案輪詢。
   const [pendingReply, setPendingReply] = useState(false);
+  // 送出後「送出」鈕原地換成「中斷」:手機連點 / 多碰一下就會打到中斷(game-lab 實際發生過)。
+  // 送出後 STOP_GUARD_MS 內中斷鈕先 disabled。
+  const [stopGuard, setStopGuard] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
@@ -430,6 +436,8 @@ export default function Chat({ repo, isActive, layout = 'panel', linkPath }: Pro
     const at = new Date().toISOString();
     setTurns((t) => [...t, { role: 'human', text: prompt, at }, { role: 'assistant', text: '', at }]);
     setStreamingThreads((s) => new Set(s).add(thread));
+    setStopGuard(true);
+    window.setTimeout(() => setStopGuard(false), STOP_GUARD_MS);
     try {
       const r = await fetch(`/api/${repo}/chat`, {
         method: 'POST',
@@ -454,6 +462,17 @@ export default function Chat({ repo, isActive, layout = 'panel', linkPath }: Pro
             const last = copy[copy.length - 1];
             if (!last || last.role !== 'assistant') return t; // 畫面已換過 → 不亂接
             copy[copy.length - 1] = { ...last, text: last.text + text };
+            return copy;
+          });
+        } else if (event === 'done') {
+          // 被中斷 → 畫面那則換成後端落檔的內容(「已中斷」標記),不留空的轉圈。
+          const d = data as { aborted?: boolean; text?: string };
+          if (!d.aborted || activeThreadRef.current !== thread) return;
+          setTurns((t) => {
+            const copy = [...t];
+            const last = copy[copy.length - 1];
+            if (!last || last.role !== 'assistant') return t;
+            copy[copy.length - 1] = { ...last, text: d.text ?? last.text };
             return copy;
           });
         } else if (event === 'stderr') {
@@ -827,7 +846,13 @@ export default function Chat({ repo, isActive, layout = 'panel', linkPath }: Pro
           </Popover>
           {streaming || job ? (
             <Tooltip title="中斷這輪(已寫出的紀錄不回捲)">
-              <Button danger icon={<StopOutlined />} onClick={() => void stop()} data-loc="chat:composer:stop">
+              <Button
+                danger
+                icon={<StopOutlined />}
+                disabled={stopGuard}
+                onClick={() => void stop()}
+                data-loc="chat:composer:stop"
+              >
                 中斷
               </Button>
             </Tooltip>

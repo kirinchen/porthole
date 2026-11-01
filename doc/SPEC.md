@@ -183,7 +183,7 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
   argv 不經 shell 已擋掉注入,但把任意字串當 flag 丟給 CLI 會整趟起不來。
 - **job registry(跑著的那輪看得到、停得掉)**:後端記 in-flight run(`thread → {state, startedAt, model, effort}`)。
   - `GET /api/:repo/chat/jobs/:thread` → `{job}`(無則 `null`)
-  - `DELETE /api/:repo/chat/jobs/:thread` → SIGTERM 那支 `claude -p`(已 append 的 turn 不回捲)
+  - `DELETE /api/:repo/chat/jobs/:thread` → SIGTERM 那支 `claude -p`(已 append 的 turn 不回捲)。被中斷的輪落檔標 `_(已中斷)_`(沒任何輸出時寫 `_(已中斷,沒有回覆)_`,不留空的 Assistant turn);SSE `done` 帶 `{aborted, text}` 讓畫面同步。composer 送出後「送出」鈕原地變「中斷」,**送出後 1.5 秒內中斷鈕 disabled**(手機連點誤觸)
   - 開 thread / 重整 / 另一台瀏覽器進來都先問這支 → 不必再靠「檔尾是 Human turn」去猜(那只是 fallback,
     見下方 `chat:pending`);後端重啟則 registry 隨記憶體消失,退回 fallback。
   - **client 斷線不 kill 子程序**:關分頁 / 重整 / 切走都讓那輪跑完並 append 到檔案(見下一條)。
