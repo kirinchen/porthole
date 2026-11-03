@@ -102,6 +102,12 @@ function parseInternalPath(pathname: string, hash: string, search = ''): LinkTar
 }
 
 /**
+ * 後端自己的路徑前綴(不是 repo):`/run/…` 原型執行網址、`/api/…`。站內連結指到這些 → 當外部連結
+ * (新分頁、整頁載入),不要 SPA 導航成 repo「run」/「api」(會變成 scandir <base>/run 的 ENOENT)。
+ */
+const SERVER_PREFIX = /^\/(run|api)(\/|$)/;
+
+/**
  * 解析 href。curRepo / curFilePath = 目前 repo 與目前開啟檔(相對路徑基準)。
  * 回傳 null = 無法導航(空字串)。
  */
@@ -127,7 +133,9 @@ export function resolveLink(href: string, curRepo: string, curFilePath: string):
     if (scheme === 'http' || scheme === 'https') {
       try {
         const u = new URL(raw);
-        if (u.host === location.host) return parseInternalPath(u.pathname, u.hash, u.search);
+        if (u.host === location.host && !SERVER_PREFIX.test(u.pathname)) {
+          return parseInternalPath(u.pathname, u.hash, u.search);
+        }
       } catch {
         /* 解析失敗 → 當外部 */
       }
@@ -137,6 +145,7 @@ export function resolveLink(href: string, curRepo: string, curFilePath: string):
 
   // 站內絕對路徑 /<repo>/<path>[?sec=…][#tab]
   if (raw.startsWith('/')) {
+    if (SERVER_PREFIX.test(raw)) return { kind: 'external', url: raw };
     const { path, search, hash } = splitUrl(raw);
     return parseInternalPath(path, hash, search);
   }
