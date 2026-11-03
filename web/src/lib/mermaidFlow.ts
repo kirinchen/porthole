@@ -53,6 +53,35 @@ function parseStyleProps(spec: string): FlowClassStyle {
   return out;
 }
 
+/** 亮色(相對亮度 > 0.6)的 #rgb / #rrggbb。非 hex(命名色、rgb())一律當不亮。 */
+export function isLight(color: string): boolean {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color.trim());
+  if (!m) return false;
+  const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1];
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6;
+}
+
+/** 淺色 fill 上的字色(深色主題下 mermaid 預設是淺字,疊在淺底上看不見)。 */
+export const DARK_TEXT = '#14232b';
+
+/**
+ * 渲染前處理:`classDef` / `style` 有淺色 fill 卻沒指定 color → 補 `color:<DARK_TEXT>`。
+ * 只給渲染用,不寫回檔案。
+ */
+export function withReadableText(code: string): string {
+  return code
+    .split('\n')
+    .map((line) => {
+      const m = /^(\s*(?:classDef|style)\s+\S+\s+)(.+?)(\s*;?\s*)$/.exec(line);
+      if (!m) return line;
+      const p = parseStyleProps(m[2]);
+      if (!p.fill || p.color || !isLight(p.fill)) return line;
+      return `${m[1]}${m[2]},color:${DARK_TEXT}${m[3]}`;
+    })
+    .join('\n');
+}
+
 /**
  * 每個節點最後該套的樣式:classDef 經 `class` 語句 / `:::cls` 套上,`style <id>` 再蓋過去。
  * 回 id → 樣式;沒樣式的節點不在表裡。

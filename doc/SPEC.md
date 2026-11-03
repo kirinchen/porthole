@@ -105,7 +105,7 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 字型 `system-ui, "Noto Sans TC", sans-serif`,基準 `14px/1.5`,圓角 10。Antd 走 `theme.darkAlgorithm` + 上表 token。
 
 **連圖一起深色**,否則深色頁面中間會爆出一塊白:
-- mermaid `theme: 'dark'`、Excalidraw `theme="dark"`(皆對齊 Tide)。
+- mermaid `theme: 'dark'`、Excalidraw `theme="dark"`(皆對齊 Tide)。mermaid 渲染前 `withReadableText`:`classDef` / `style` 有淺色 fill 卻沒指定 `color` → 補深字(只影響渲染,不寫回檔案),否則深色主題的淺字疊淺底看不見。
 - d2 固定 `--theme=200`(Dark Mauve);**不要用 `--dark-theme`** —— 那是「瀏覽器 prefers-color-scheme
   為深色才套」,使用者系統設亮色就會出白圖(Tide 踩過)。
 - CM6 編輯器的語法高亮不能用內建 `defaultHighlightStyle`(亮底配色,深色上讀不到)→

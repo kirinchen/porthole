@@ -31,6 +31,8 @@ import {
   parseFlow,
   serializeFlow,
   nodeStyles,
+  isLight,
+  DARK_TEXT,
   type FlowGraph,
   type FlowShape,
   type FlowClassStyle,
@@ -42,15 +44,6 @@ const SHAPE_OPTS: { value: FlowShape; label: string }[] = [
   { value: 'diamond', label: '菱形(判斷)' },
 ];
 
-/** `#rgb` / `#rrggbb` 是不是淺色(相對亮度 > 0.6)。非 hex(具名色、rgb())一律當深色。 */
-function isLight(color: string): boolean {
-  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color.trim());
-  if (!m) return false;
-  const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1];
-  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6;
-}
-
 /** 自訂節點:依 data.shape 用 SVG 畫矩形 / 圓角 / 菱形,標籤置中,上下接點。 */
 function ShapedNode({ data }: NodeProps) {
   const d = data as { label?: string; shape?: FlowShape; look?: FlowClassStyle };
@@ -59,7 +52,7 @@ function ShapedNode({ data }: NodeProps) {
   // 不然主題的淺字壓在淺底上看不見。
   const fill = d.look?.fill ?? 'var(--card)';
   const stroke = d.look?.stroke ?? 'var(--muted)';
-  const textColor = d.look?.color ?? (d.look?.fill && isLight(d.look.fill) ? '#1a1a1a' : undefined);
+  const textColor = d.look?.color ?? (d.look?.fill && isLight(d.look.fill) ? DARK_TEXT : undefined);
   const w = NODE_W;
   const h = NODE_H;
   const shapeEl =

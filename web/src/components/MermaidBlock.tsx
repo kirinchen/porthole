@@ -13,7 +13,7 @@ import { Segmented, Input, Button, Space, Spin, Switch } from 'antd';
 import { CloseOutlined, FullscreenOutlined } from '@ant-design/icons';
 import type { SegmentedValue } from 'antd/es/segmented';
 import { markKeepGui, takeKeepGui } from '../lib/guiSession';
-import { isFlowchart } from '../lib/mermaidFlow';
+import { isFlowchart, withReadableText } from '../lib/mermaidFlow';
 import { isStateDiagram } from '../lib/mermaidState';
 import { isErd } from '../lib/mermaidErd';
 import { isClassDiagram } from '../lib/mermaidClass';
@@ -97,7 +97,7 @@ export default function MermaidBlock({ code, onApply, sessionKey, expandable }: 
     let alive = true;
     void getMermaid().then(async (mermaid) => {
       try {
-        const { svg } = await mermaid.render(`mmd-${seq++}`, code);
+        const { svg } = await mermaid.render(`mmd-${seq++}`, withReadableText(code)); // 淺底補深字(不寫回)
         if (alive) {
           setSvg(svg);
           setErr(null);

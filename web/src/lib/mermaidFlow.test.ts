@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseFlow, serializeFlow, nodeStyles } from './mermaidFlow.ts';
+import { parseFlow, serializeFlow, nodeStyles, withReadableText } from './mermaidFlow.ts';
 
 const SRC = `flowchart TD
     A[開始] --> B{判斷}
@@ -53,4 +53,21 @@ test('標籤的 <br/> → GUI 換行,存回再變 <br/>', () => {
   const out = serializeFlow(g);
   assert.match(out, /n4\["不用 Obsidian 了<br\/>自己寫 porthole"\]/);
   assert.match(out, /-->\|a<br\/>b\| n5/);
+});
+
+test('withReadableText:淺色 fill 沒字色 → 補深字;已有 color / 深色 fill 不動', () => {
+  const src = [
+    'flowchart TD',
+    '    classDef done fill:#d3f9d8,stroke:#2f9e44',
+    '    classDef idea fill:#f1f3f5,stroke:#868e96,stroke-dasharray:4 3',
+    '    classDef dark fill:#1b2b33,stroke:#000',
+    '    classDef own fill:#fff,color:#c00',
+    '    style A fill:#ffe8cc;',
+  ].join('\n');
+  const out = withReadableText(src).split('\n');
+  assert.equal(out[1], '    classDef done fill:#d3f9d8,stroke:#2f9e44,color:#14232b');
+  assert.equal(out[2], '    classDef idea fill:#f1f3f5,stroke:#868e96,stroke-dasharray:4 3,color:#14232b');
+  assert.equal(out[3], '    classDef dark fill:#1b2b33,stroke:#000');
+  assert.equal(out[4], '    classDef own fill:#fff,color:#c00');
+  assert.equal(out[5], '    style A fill:#ffe8cc,color:#14232b;');
 });
