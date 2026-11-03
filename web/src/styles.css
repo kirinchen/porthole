@@ -493,3 +493,8 @@ body {
   --xy-edge-stroke: var(--muted, #7d97a5);
   --xy-attribution-background-color: transparent;
 }
+
+/* mermaid 點圖全螢幕(MermaidBlock expandable):圖撐滿可用空間,viewBox 保持比例。 */
+.ph-mmd-full { display: flex; align-items: center; justify-content: center; }
+.ph-mmd-full svg { width: 100% !important; height: 100% !important; max-width: none !important; }
+.ph-mmd-inline:hover { outline: 1px dashed var(--line); outline-offset: 4px; border-radius: 6px; }

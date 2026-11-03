@@ -1,11 +1,12 @@
 /**
  * Markdown — 共用的 markdown 渲染器(Explore 預覽 + Chat 訊息)。
  *  - remark-gfm。
- *  - ```mermaid 區塊 → MermaidBlock(預覽 / 編輯 / GUI tab);給 onMermaidChange 時可寫回。
+ *  - ```mermaid 區塊 → MermaidBlock(行內只放圖,點了全螢幕;全螢幕裡 預覽 / 編輯 / GUI);
+ *    給 onMermaidChange 時可寫回(d2 / excalidraw 在預覽仍唯讀)。
  *  - 其餘 code 區塊照常 <pre><code>;行內 code 維持 <code>。
  *  呼叫端自行包 .md-preview(沿用既有樣式)。
  */
-import { isValidElement, type ReactNode } from 'react';
+import { createContext, isValidElement, useContext, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { message } from 'antd';
@@ -154,58 +155,65 @@ function MdImg({ src, alt }: { src?: string; alt?: string }) {
   return <img src={realSrc} alt={alt ?? ''} />;
 }
 
+/** 預覽寫回圖表的 callback(Explore 預覽給;Chat 不給)。走 context 讓 MdCode 能是模組層的穩定元件。 */
+const MermaidChangeContext = createContext<Props['onMermaidChange']>(undefined);
+
+/** react-markdown 的 pre:交給 code 自己決定包裝(mermaid 不能塞在 <pre> 裡)。 */
+function MdPre({ children }: { children?: ReactNode }) {
+  return <>{children}</>;
+}
+
+/**
+ * react-markdown 的 code。**必須是模組層元件**:寫成 components={{ code: () => … }} 每次渲染都是新
+ * 函式 → React 當成不同元件型別、整棵 remount —— MermaidBlock 的全螢幕 / 編輯狀態一存檔就沒了。
+ */
+function MdCode({ className, children: c }: { className?: string; children?: ReactNode }) {
+  const onMermaidChange = useContext(MermaidChangeContext);
+  const cls = className ?? '';
+  const text = String(c ?? '').replace(/\n$/, '');
+  if (/\blanguage-mermaid\b/.test(cls)) {
+    return (
+      <MermaidBlock
+        code={text}
+        expandable
+        onApply={onMermaidChange ? (nc) => onMermaidChange(text, nc) : undefined}
+      />
+    );
+  }
+  if (/\blanguage-d2\b/.test(cls)) {
+    return <D2Block code={text} />;
+  }
+  if (/\blanguage-excalidraw\b/.test(cls)) {
+    return <ExcalidrawBlock code={text} />;
+  }
+  const isBlock = /\blanguage-/.test(cls) || text.includes('\n');
+  if (isBlock) {
+    // fenced code:與編輯器共用語言 parser 做語法高亮(清單外語言 → 純文字)。
+    const lang = (/\blanguage-([\w+#-]+)/.exec(cls)?.[1] ?? '').toLowerCase();
+    return <CodeBlock code={text} lang={lang} />;
+  }
+  return <code className={cls}>{c}</code>;
+}
+
 export default function Markdown({ children, onMermaidChange, headingAnchors }: Props) {
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        // 連結:相對路徑以目前檔為基準解析 → SPA 導航(見 MdLink)
-        a: ({ href, children: c }) => <MdLink href={href}>{c}</MdLink>,
-        // 圖片:相對路徑以目前檔為基準解析 → /api/:repo/raw(見 MdImg)
-        img: ({ src, alt }) => <MdImg src={typeof src === 'string' ? src : undefined} alt={alt} />,
-        // 標題:給預覽時加 GitHub 式定位錨點(id + hover `#`)。每次渲染重建 → seen Map 依
-        // 文件序去重(同名標題補序號);穩定 Map 會在 re-render 累加而算錯,故不快取。
-        ...(headingAnchors ? headingComponents() : {}),
-        // pre 交給 code 自己決定包裝(mermaid 不能塞在 <pre> 裡)
-        pre: ({ children: c }) => <>{c}</>,
-        code: ({ className, children: c }) => {
-          const cls = className ?? '';
-          const text = String(c ?? '').replace(/\n$/, '');
-          if (/\blanguage-mermaid\b/.test(cls)) {
-            return (
-              <MermaidBlock
-                code={text}
-                onApply={onMermaidChange ? (nc) => onMermaidChange(text, nc) : undefined}
-              />
-            );
-          }
-          if (/\blanguage-d2\b/.test(cls)) {
-            return (
-              <D2Block
-                code={text}
-                onApply={onMermaidChange ? (nc) => onMermaidChange(text, nc) : undefined}
-              />
-            );
-          }
-          if (/\blanguage-excalidraw\b/.test(cls)) {
-            return (
-              <ExcalidrawBlock
-                code={text}
-                onApply={onMermaidChange ? (nc) => onMermaidChange(text, nc) : undefined}
-              />
-            );
-          }
-          const isBlock = /\blanguage-/.test(cls) || text.includes('\n');
-          if (isBlock) {
-            // fenced code:與編輯器共用語言 parser 做語法高亮(清單外語言 → 純文字)。
-            const lang = (/\blanguage-([\w+#-]+)/.exec(cls)?.[1] ?? '').toLowerCase();
-            return <CodeBlock code={text} lang={lang} />;
-          }
-          return <code className={cls}>{c}</code>;
-        },
-      }}
-    >
-      {children}
-    </ReactMarkdown>
+    <MermaidChangeContext.Provider value={onMermaidChange}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          // 連結:相對路徑以目前檔為基準解析 → SPA 導航(見 MdLink)
+          a: ({ href, children: c }) => <MdLink href={href}>{c}</MdLink>,
+          // 圖片:相對路徑以目前檔為基準解析 → /api/:repo/raw(見 MdImg)
+          img: ({ src, alt }) => <MdImg src={typeof src === 'string' ? src : undefined} alt={alt} />,
+          // 標題:給預覽時加 GitHub 式定位錨點(id + hover `#`)。每次渲染重建 → seen Map 依
+          // 文件序去重(同名標題補序號);穩定 Map 會在 re-render 累加而算錯,故不快取。
+          ...(headingAnchors ? headingComponents() : {}),
+          pre: MdPre,
+          code: MdCode,
+        }}
+      >
+        {children}
+      </ReactMarkdown>
+    </MermaidChangeContext.Provider>
   );
 }

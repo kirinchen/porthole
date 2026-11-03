@@ -137,7 +137,7 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
 - **樹節點動作**(hover 圖示,檔案 / 資料夾皆有):改名(同層)、**移動到資料夾**(TreeSelect lazy 只列資料夾 → 換目錄,沿用 `POST /api/:repo/rename {from,to}`,雙路徑 path-guard、目標已存在回 409;移動資料夾時擋自身/子孫不可為目標)、刪除(資料夾連內容)。開啟檔或其祖先夾被改名 / 移動 → 同步更新 `sel`/網址 / 樹反白並展開新位置。
 - 寫入受 path-guard 鎖在 active repo root 內(見 §2 寫入面)。
 - **mermaid**:
-  - **預覽**:純渲染 ```mermaid 圖(securityLevel=strict),不帶編輯控制(預覽即看)。
+  - **預覽**:純渲染 ```mermaid 圖(securityLevel=strict),行內不帶編輯控制。**點圖 → 全螢幕**(`data-loc=mermaid:expand` → `mermaid:full`,portal 覆蓋整個視窗,圖撐滿),全螢幕右上 tab 切 **預覽 / 編輯 / GUI**,× 或 Esc(預覽時)關閉;編輯 / GUI 套用 → 換掉那段 ```mermaid 直接存檔,存完留在全螢幕。Chat 裡只能全螢幕看、不能改。Markdown 的 `code` 必須是模組層穩定元件(`MdCode`,callback 走 context),否則每次重繪都 remount、全螢幕狀態會掉。
   - **編輯(CM6)**:每個 ```mermaid block 換成互動 box,右上 tab 切 **預覽 / 編輯 / GUI**;
     **flowchart / stateDiagram / erDiagram / classDiagram / sequenceDiagram / architecture-beta / mindmap 有 GUI tab**(各對應專屬編輯器),其餘只有 預覽 / 編輯。
     套用直接改寫 CM6 文件對應區塊,隨檔案一起存。空白行右鍵選單可一鍵插入各圖型範例(GUI 可編輯)。

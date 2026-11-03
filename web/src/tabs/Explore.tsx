@@ -66,6 +66,7 @@ import {
   CodeOutlined,
   ExportOutlined,
 } from '@ant-design/icons';
+import { replaceMermaidBlock } from '../lib/mermaidFlow';
 import { api, type TreeItem, type SearchFile } from '../lib/api';
 import Markdown from '../components/Markdown';
 import EnvView from '../components/EnvView';
@@ -2316,7 +2317,15 @@ export function ExplorePreview() {
           <EnvView content={c.sel.content} />
         ) : c.sel.markdown ? (
           <div className="md-preview">
-            <Markdown headingAnchors>{c.sel.content}</Markdown>
+            <Markdown
+              headingAnchors
+              onMermaidChange={(oldCode, newCode) => {
+                // 預覽點圖 → 全螢幕裡改(編輯 / GUI)→ 換掉那段 ```mermaid 直接存檔。
+                if (c.sel) void c.saveFileContent(replaceMermaidBlock(c.sel.content, oldCode, newCode));
+              }}
+            >
+              {c.sel.content}
+            </Markdown>
           </div>
         ) : (
           <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>
