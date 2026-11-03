@@ -88,6 +88,7 @@ function ShapedNode({ data }: NodeProps) {
           padding: shape === 'diamond' ? '0 22px' : '0 8px',
           boxSizing: 'border-box',
           overflow: 'hidden',
+          whiteSpace: 'pre-line', // 標籤的換行(mermaid `<br/>`,見 brToNewline)
         }}
       >
         {d.label}
@@ -443,11 +444,17 @@ export default function FlowEditor({ code, onSave, onClose, fill }: Props) {
         cancelText="取消"
       >
         <Space direction="vertical" style={{ width: '100%' }}>
-          <Input
+          {/* 多行:Enter 確定、Shift+Enter 換行(存回 mermaid 是 `<br/>`)。 */}
+          <Input.TextArea
             autoFocus
+            autoSize={{ minRows: 1, maxRows: 6 }}
             value={editNode?.label ?? ''}
             onChange={(e) => setEditNode((s) => (s ? { ...s, label: e.target.value } : s))}
-            onPressEnter={applyNodeLabel}
+            onPressEnter={(e) => {
+              if (e.shiftKey || e.nativeEvent.isComposing) return;
+              e.preventDefault();
+              applyNodeLabel();
+            }}
           />
           <span>
             形狀{' '}

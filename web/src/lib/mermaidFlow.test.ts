@@ -45,3 +45,12 @@ test('來回一趟樣式語句還在;刪掉的節點會從 class 清單濾掉', 
   assert.match(cut, /class D,C hasPJ/);
   assert.doesNotMatch(cut, /style A/);
 });
+
+test('標籤的 <br/> → GUI 換行,存回再變 <br/>', () => {
+  const g = parseFlow('flowchart TD\n  n4["不用 Obsidian 了<br/>自己寫 porthole"] -->|a<br>b| n5');
+  assert.equal(g.nodes.find((n) => n.id === 'n4')?.label, '不用 Obsidian 了\n自己寫 porthole');
+  assert.equal(g.edges[0].label, 'a\nb');
+  const out = serializeFlow(g);
+  assert.match(out, /n4\["不用 Obsidian 了<br\/>自己寫 porthole"\]/);
+  assert.match(out, /-->\|a<br\/>b\| n5/);
+});

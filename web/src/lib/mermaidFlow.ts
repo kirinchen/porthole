@@ -125,7 +125,7 @@ function parseNodeSpec(
     shape = 'diamond';
   }
   if (label !== undefined) {
-    label = label.trim().replace(/^"(.*)"$/s, '$1').replace(/^'(.*)'$/s, '$1');
+    label = brToNewline(label.trim().replace(/^"(.*)"$/s, '$1').replace(/^'(.*)'$/s, '$1'));
   }
   ensure(id, label, shape, classes);
   return id;
@@ -155,7 +155,8 @@ function parseStatement(
   const ids = parts.map((p) => parseNodeSpec(p, ensure)).filter(Boolean);
   if (!hasArrow) return; // 純節點宣告,parseNodeSpec 已登記
   for (let i = 0; i + 1 < ids.length; i++) {
-    const label = labels[i]?.trim();
+    const raw = labels[i];
+    const label = raw === undefined ? undefined : brToNewline(raw.trim());
     edges.push({ source: ids[i], target: ids[i + 1], label: label || undefined });
   }
 }
@@ -241,7 +242,12 @@ function keepExtras(g: FlowGraph): string[] {
 }
 
 function escapeLabel(s: string): string {
-  return s.replace(/"/g, '&quot;');
+  return s.replace(/"/g, '&quot;').replace(/\n/g, '<br/>');
+}
+
+/** mermaid 標籤裡的 `<br>` / `<br/>` = 換行 → GUI 內部用 `\n`(serializeFlow 再換回 `<br/>`)。 */
+export function brToNewline(s: string): string {
+  return s.replace(/<br\s*\/?>/gi, '\n');
 }
 
 /** 圖模型 → 正規化 mermaid flowchart 文字。 */
@@ -260,7 +266,7 @@ export function serializeFlow(g: FlowGraph): string {
     }
   }
   for (const e of g.edges) {
-    if (e.label) lines.push(`    ${e.source} -->|${e.label}| ${e.target}`);
+    if (e.label) lines.push(`    ${e.source} -->|${e.label.replace(/\n/g, '<br/>')}| ${e.target}`);
     else lines.push(`    ${e.source} --> ${e.target}`);
   }
   for (const x of keepExtras(g)) lines.push(`    ${x}`);

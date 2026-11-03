@@ -145,7 +145,7 @@ Node 走 nvm 管理。前端 strict TS,`no-explicit-any` 比照 InRay 從嚴。
     - **flowchart**(`mermaidFlow` + `FlowEditor`):矩形/圓角/菱形節點 + 有向邊 + 邊標籤 + 方向。
       樣式語句(`classDef` / `class` / `style` / `linkStyle` / `click`)**不是節點**:原樣保留、存檔寫回
       (引用到 GUI 刪掉的節點會濾掉,免得 mermaid 憑空生回來);`:::cls` 掛在節點上。GUI 照 classDef
-      的 fill / stroke / color 畫節點,淺色 fill 沒指定字色就用深字。
+      的 fill / stroke / color 畫節點,淺色 fill 沒指定字色就用深字。標籤裡的 `<br>` / `<br/>` 在 GUI 顯示成換行(節點標籤編輯框 Shift+Enter 換行),存回寫 `<br/>`。
     - **state diagram**(`mermaidState` + `StateEditor`):狀態 + 起點/終點([*]) + 轉移標籤 + 方向。
     - **ERD**(`mermaidErd` + `ErdEditor`):實體(屬性 type/name/PK/FK/UK/註解)+ 關係(左右 cardinality + 識別/非識別 + 標籤)。
     - **class**(`mermaidClass` + `ClassEditor`):類別(stereotype + 成員 visibility/attr/method)+ 關係(繼承/組合/聚合/關聯/依賴/實現 + multiplicity + 標籤)。
